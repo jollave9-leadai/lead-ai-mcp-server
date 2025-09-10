@@ -62,7 +62,12 @@ const handler = createMcpHandler(
             ],
           };
         }
-        initiateCall(customer.item.phone_number, message, agent, clientId);
+        await initiateCall(
+          customer.item.phone_number,
+          message,
+          agent,
+          clientId
+        );
         return {
           content: [
             {
