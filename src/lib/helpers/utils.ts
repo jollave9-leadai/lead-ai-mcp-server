@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import Fuse from "fuse.js";
 import axios from "axios";
+import { BASE_SUPABASE_FUNCTIONS_URL } from "./constants";
 
 export const getCustomerWithFuzzySearch = async (name: string) => {
   const supabase = createClient(
@@ -165,6 +166,66 @@ export const initiateCall = async (
         "Content-Type": "application/json",
         Authorization: `Bearer ${vapiIntegration.auth_token}`,
       },
+    }
+  );
+};
+
+export const getCustomerPipeLineWithFuzzySearch = async (fullName: string) => {
+  const supabase = createClient(
+    process.env.CRM_SUPABASE_URL!,
+    process.env.CRM_SUPABASE_ANON_KEY!
+  );
+  const { data: customerPipeLines } = await supabase
+    .from("customer_pipeline_items_with_customers")
+    .select("id, full_name, pipeline_stage_id");
+
+  const fuse = new Fuse(customerPipeLines || [], {
+    keys: ["full_name"], // fields to search
+    threshold: 0.3, // how fuzzy (0 = exact, 1 = very fuzzy)
+  });
+  return fuse.search(fullName);
+};
+
+export const getNextPipeLineStage = async (pipelineStageId: string) => {
+  const supabase = createClient(
+    process.env.CRM_SUPABASE_URL!,
+    process.env.CRM_SUPABASE_ANON_KEY!
+  );
+  const { data: pipeline } = await supabase
+    .from("pipelines")
+    .select("id, pipeline_stages(id, sort_order)")
+    .order("sort_order", {
+      referencedTable: "pipeline_stages",
+      ascending: true,
+    })
+    .eq("is_default", true)
+    .eq("name", "Default Pipeline for LeadAI")
+    .single();
+
+  const currentIndex = pipeline?.pipeline_stages.findIndex(
+    (stage) => stage.id === pipelineStageId
+  );
+  // check if currentIndex is undefined since 0 is also falsy
+  if (
+    currentIndex === undefined ||
+    currentIndex === -1 ||
+    !pipeline?.pipeline_stages[currentIndex + 1]
+  ) {
+    return null;
+  }
+  return pipeline?.pipeline_stages[currentIndex + 1];
+};
+
+export const moveLeadToNextStage = async (
+  customerPipelineId: string,
+  pipelineStageId: string
+) => {
+  console.log("customerPipelineId", customerPipelineId);
+  console.log("pipelineStageId", pipelineStageId);
+  await axios.put(
+    `${BASE_SUPABASE_FUNCTIONS_URL}/customer-pipeline-items/${customerPipelineId}/stage`,
+    {
+      pipeline_stage_id: pipelineStageId,
     }
   );
 };

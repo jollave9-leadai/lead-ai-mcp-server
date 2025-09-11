@@ -5,17 +5,20 @@ import {
   getAvailableAgent,
   initiateCall,
 } from "@/lib/helpers";
+import axios from "axios";
 
 const handler = createMcpHandler(
   (server) => {
     server.tool(
-      "roll_dice",
-      "Rolls an N-sided die",
-      { sides: z.number().int().min(2) },
-      async ({ sides }) => {
-        const value = 1 + Math.floor(Math.random() * sides);
+      "send-message-to-crm-agent",
+      "Move a customer to the next pipeline stage",
+      { message: z.string() },
+      async ({ message }) => {
+        axios.post(process.env.CRM_AGENT_URL!, {
+          message,
+        });
         return {
-          content: [{ type: "text", text: `🎲 You rolled a ${value}!` }],
+          content: [{ type: "text", text: `Message sent to CRM agent` }],
         };
       }
     );
