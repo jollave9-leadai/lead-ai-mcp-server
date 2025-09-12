@@ -22,6 +22,10 @@ import {
   formatSlotsForDisplay,
   getSlotsForClient,
   createValidatedBookingForClient,
+  checkClientConnectedCalendars,
+  getCalendarEvents,
+  formatCalendarEventsAsString,
+  parseDateRequest,
 } from "@/lib/helpers/calendar_functions";
 
 const handler = createMcpHandler(
@@ -1231,6 +1235,185 @@ const handler = createMcpHandler(
               {
                 type: "text",
                 text: `Error creating booking: ${
+                  error instanceof Error ? error.message : "Unknown error"
+                }`,
+              },
+            ],
+          };
+        }
+      }
+    );
+
+    server.tool(
+      "check-connected-calendars",
+      "Check if a client has connected calendars and get summary information about their calendar integrations.",
+
+      {
+        clientId: z
+          .union([z.number(), z.string().transform(Number)])
+          .describe("The ID of the client to check connected calendars for"),
+      },
+      async (input) => {
+        try {
+          const { clientId } = input;
+
+          // Convert and validate clientId
+          const numericClientId =
+            typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+
+          if (!numericClientId || isNaN(numericClientId)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "❌ Error: clientId is required and must be a valid number",
+                },
+              ],
+            };
+          }
+
+          // Check connected calendars
+          const summary = await checkClientConnectedCalendars(numericClientId);
+
+          if (!summary) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `❌ Error: Could not retrieve calendar connection information for client ${numericClientId}`,
+                },
+              ],
+            };
+          }
+
+          // Format the response
+          let responseText = `📊 **Calendar Connection Status for Client ${numericClientId}**\n\n`;
+
+          if (summary.has_active_calendars) {
+            responseText += `✅ **Status**: Connected\n`;
+            responseText += `📈 **Total Calendars**: ${summary.total_calendars}\n`;
+            responseText += `🔗 **Connected Calendars**: ${summary.connected_calendars}\n`;
+
+            if (summary.google_calendars > 0) {
+              responseText += `📧 **Google Calendars**: ${summary.google_calendars}\n`;
+            }
+
+            if (summary.office365_calendars > 0) {
+              responseText += `🏢 **Office 365 Calendars**: ${summary.office365_calendars}\n`;
+            }
+
+            if (summary.primary_calendar) {
+              responseText += `⭐ **Primary Calendar**: ${summary.primary_calendar.account_email} (${summary.primary_calendar.calendar_type})\n`;
+            }
+
+            responseText += `\n✅ This client can fetch calendar events.`;
+          } else {
+            responseText += `❌ **Status**: No Connected Calendars\n`;
+            responseText += `📊 **Total Calendars**: ${summary.total_calendars}\n`;
+            responseText += `🔗 **Connected Calendars**: ${summary.connected_calendars}\n`;
+            responseText += `\n⚠️ This client needs to connect their calendars before fetching events.`;
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: responseText,
+              },
+            ],
+          };
+        } catch (error) {
+          console.error("❌ Error in CheckConnectedCalendars:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ Error checking connected calendars: ${
+                  error instanceof Error ? error.message : "Unknown error"
+                }`,
+              },
+            ],
+          };
+        }
+      }
+    );
+
+    server.tool(
+      "GetCalendarEvents",
+      "Get calendar events for a client from Cal.com. Uses essential parameters: eventTypeIds, afterStart, beforeEnd. Supports natural language date requests like 'today', 'tomorrow', 'this week', 'upcoming'.",
+
+      {
+        clientId: z
+          .union([z.number(), z.string().transform(Number)])
+          .describe("The ID of the client to get events for"),
+        dateRequest: z
+          .string()
+          .optional()
+          .describe(
+            "Natural language date request (e.g., 'today', 'tomorrow', 'this week', 'upcoming')"
+          ),
+      },
+      async (input) => {
+        try {
+          const { clientId, dateRequest = "today" } = input;
+
+          // Convert and validate clientId
+          const numericClientId =
+            typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+
+          if (!numericClientId || isNaN(numericClientId)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "❌ Error: clientId is required and must be a valid number",
+                },
+              ],
+            };
+          }
+
+          // Get client's timezone
+          const clientTimezone = await getClientTimezone(numericClientId);
+          const timezone = clientTimezone || "UTC";
+
+          // Parse the date request
+          const dateRange = parseDateRequest(dateRequest, timezone);
+
+          console.log(`📅 Parsed date request "${dateRequest}" to:`, {
+            description: dateRange.description,
+            start: dateRange.start,
+            end: dateRange.end,
+            timezone,
+          });
+
+          // Get calendar events (using essential parameters only)
+          const events = await getCalendarEvents(numericClientId, {
+            afterStart: dateRange.start,
+            beforeEnd: dateRange.end,
+            // eventTypeIds will be automatically fetched by getCalendarEvents function
+          });
+
+          // Format events as readable string
+          const formattedEvents = formatCalendarEventsAsString(
+            events,
+            timezone
+          );
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: `📅 **Calendar Events for ${dateRange.description}** (Client ID: ${numericClientId})\n🌍 Timezone: ${timezone}\n\n${formattedEvents}`,
+              },
+            ],
+          };
+        } catch (error) {
+          console.error("❌ Error in GetCalendarEvents:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ Error retrieving calendar events: ${
                   error instanceof Error ? error.message : "Unknown error"
                 }`,
               },
