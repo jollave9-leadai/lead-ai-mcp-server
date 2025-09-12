@@ -153,16 +153,12 @@ export const initiateCall = async (
   };
   // console.log("phoneCallPayload", phoneCallPayload);
   console.log("vapiIntegration", vapiIntegration);
-  await axios.post(
-    "https://api.vapi.ai/call/phone",
-    phoneCallPayload,
-    {
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${vapiIntegration.auth_token}`,
-      },
-    }
-  );
+  await axios.post("https://api.vapi.ai/call/phone", phoneCallPayload, {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${vapiIntegration.auth_token}`,
+    },
+  });
 };
 
 export const getCustomerPipeLineWithFuzzySearch = async (fullName: string) => {
@@ -230,18 +226,18 @@ export const getCustomerInformation = async (fullName: string) => {
     process.env.CRM_SUPABASE_URL!,
     process.env.CRM_SUPABASE_ANON_KEY!
   );
-    const { data: customerPipeLines } = await supabase
-      .from("customer_pipeline_items_with_customers")
-      .select("id, full_name, pipeline_stage_id");
+  const { data: customerPipeLines } = await supabase
+    .from("customer_pipeline_items_with_customers")
+    .select("full_name, pipeline_stage_id");
 
-    const fuse = new Fuse(customerPipeLines || [], {
-      keys: ["full_name"], // fields to search
-      threshold: 0.3, // how fuzzy (0 = exact, 1 = very fuzzy)
-    });
+  const fuse = new Fuse(customerPipeLines || [], {
+    keys: ["full_name"], // fields to search
+    threshold: 0.3, // how fuzzy (0 = exact, 1 = very fuzzy)
+  });
   const [customerPipeline] = fuse.search(fullName);
   const { data: stage } = await supabase
     .from("pipeline_stages")
-    .select("*")
+    .select("name, description, sort_order")
     .eq("id", customerPipeline.item.pipeline_stage_id)
     .single();
 
