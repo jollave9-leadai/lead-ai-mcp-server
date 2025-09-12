@@ -237,7 +237,7 @@ export function parseDateRequest(
     }
   } catch (error) {
     console.log(
-      `⚠️ Could not parse "${dateRequest}" as a date, falling back to today`
+      `⚠️ Could not parse "${dateRequest}" as a date, falling back to today. Error: ${error}`
     );
   }
 

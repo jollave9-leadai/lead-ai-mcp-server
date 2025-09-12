@@ -26,6 +26,7 @@ import {
   getCalendarEvents,
   formatCalendarEventsAsString,
   parseDateRequest,
+  validateSlotAvailability,
 } from "@/lib/helpers/calendar_functions";
 
 const handler = createMcpHandler(
@@ -1414,6 +1415,433 @@ const handler = createMcpHandler(
               {
                 type: "text",
                 text: `❌ Error retrieving calendar events: ${
+                  error instanceof Error ? error.message : "Unknown error"
+                }`,
+              },
+            ],
+          };
+        }
+      }
+    );
+
+    server.tool(
+      "ValidateSlotAvailability",
+      "Validate if a specific time slot is available before creating a booking. Most common usage: provide clientId, requestedSlot, start, end, and eventTypeId. Other parameters are optional.",
+
+      {
+        clientId: z
+          .union([z.number(), z.string().transform(Number)])
+          .describe("The ID of the client to validate slots for"),
+        requestedSlot: z
+          .string()
+          .describe(
+            "The requested slot time in ISO 8601 format (e.g., '2024-01-15T10:00:00.000Z')"
+          ),
+        start: z
+          .string()
+          .describe("Start date for slot search range in ISO 8601 format"),
+        end: z
+          .string()
+          .describe("End date for slot search range in ISO 8601 format"),
+
+        // Event type identification (most common: use eventTypeId)
+        eventTypeId: z
+          .number()
+          .optional()
+          .describe(
+            "The ID of the event type (RECOMMENDED - most common usage)"
+          ),
+        eventTypeSlug: z
+          .string()
+          .optional()
+          .describe(
+            "The slug of the event type (requires username or teamSlug) - ADVANCED usage only"
+          ),
+
+        // User/Team identification
+        username: z
+          .string()
+          .optional()
+          .describe("Username for individual events"),
+        teamSlug: z.string().optional().describe("Team slug for team events"),
+
+        // Optional parameters
+        timeZone: z
+          .string()
+          .optional()
+          .describe("Timezone for validation (defaults to UTC)"),
+        duration: z.number().optional().describe("Duration in minutes"),
+        preferredManagedUserId: z
+          .number()
+          .optional()
+          .describe("Preferred managed user ID"),
+      },
+      async (input) => {
+        try {
+          const {
+            clientId,
+            requestedSlot,
+            start,
+            end,
+            eventTypeId,
+            timeZone,
+            preferredManagedUserId,
+          } = input;
+
+          // Convert and validate clientId
+          const numericClientId =
+            typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+
+          if (!numericClientId || isNaN(numericClientId)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "Error: clientId is required and must be a valid number",
+                },
+              ],
+            };
+          }
+
+          // Validate requested slot
+          const slotValidation = validateISO8601Date(requestedSlot);
+          if (!slotValidation.isValid) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Error: Invalid requested slot - ${slotValidation.error}`,
+                },
+              ],
+            };
+          }
+
+          console.log(
+            `🔍 Validating slot availability for client ${numericClientId}: ${requestedSlot}`
+          );
+
+          // Build slots request (most common: start, end, eventTypeId)
+          const slotsRequest: GetSlotsRequest = {
+            start: formatToISO8601(start),
+            end: formatToISO8601(end),
+            eventTypeId,
+          };
+
+          // Get available slots
+          const slotsResponse = await getSlotsForClient(
+            numericClientId,
+            slotsRequest,
+            preferredManagedUserId
+          );
+
+          if (slotsResponse.status === "error") {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `❌ Error validating slot: ${
+                    slotsResponse.error?.message || "Unknown error"
+                  }`,
+                },
+              ],
+            };
+          }
+
+          // Validate the specific slot
+          const validation = validateSlotAvailability(
+            slotsResponse,
+            requestedSlot
+          );
+
+          let responseText = `**🔍 Slot Validation for Client ${numericClientId}**\n\n`;
+
+          // Format requested slot for display
+          const requestedDate = new Date(requestedSlot);
+          const formattedDate = requestedDate.toLocaleDateString("en-US", {
+            weekday: "long",
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            timeZone: timeZone || "UTC",
+          });
+          const formattedTime = requestedDate.toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: timeZone || "UTC",
+          });
+
+          responseText += `**📅 Requested Slot:**\n`;
+          responseText += `- **Date**: ${formattedDate}\n`;
+          responseText += `- **Time**: ${formattedTime} (${
+            timeZone || "UTC"
+          })\n`;
+          responseText += `- **ISO Format**: ${requestedSlot}\n\n`;
+
+          // Availability result
+          if (validation.isAvailable) {
+            responseText += `**✅ SLOT AVAILABLE**\n\n`;
+            responseText += `🎉 **Great news!** The requested slot is available for booking.\n\n`;
+            responseText += `**💡 Next Steps:**\n`;
+            responseText += `1. ✅ **Proceed with CreateBooking** using this exact time\n`;
+            responseText += `2. 📝 **Use startTime**: \`${requestedSlot}\`\n`;
+            responseText += `3. 🚀 **Book immediately** to secure this slot\n`;
+          } else {
+            responseText += `**❌ SLOT NOT AVAILABLE**\n\n`;
+            responseText += `😞 **Sorry!** The requested slot is not available.\n\n`;
+
+            // Show available slots for that date
+            if (validation.availableSlots.length > 0) {
+              responseText += `**📅 Available slots on ${formattedDate}:**\n`;
+              validation.availableSlots.forEach((slot, index) => {
+                const slotTime = new Date(slot.start).toLocaleTimeString(
+                  "en-US",
+                  {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone: timeZone || "UTC",
+                  }
+                );
+                responseText += `  ${index + 1}. ${slotTime} (${slot.start})\n`;
+              });
+              responseText += `\n`;
+            } else {
+              responseText += `**📅 No slots available on ${formattedDate}**\n\n`;
+            }
+
+            // Show nearest alternative
+            if (validation.nearestAvailable) {
+              const nearestDate = new Date(validation.nearestAvailable.start);
+              const nearestFormattedDate = nearestDate.toLocaleDateString(
+                "en-US",
+                {
+                  weekday: "long",
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                  timeZone: timeZone || "UTC",
+                }
+              );
+              const nearestFormattedTime = nearestDate.toLocaleTimeString(
+                "en-US",
+                {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  timeZone: timeZone || "UTC",
+                }
+              );
+
+              responseText += `**🎯 Nearest Available Slot:**\n`;
+              responseText += `- **Date**: ${nearestFormattedDate}\n`;
+              responseText += `- **Time**: ${nearestFormattedTime}\n`;
+              responseText += `- **ISO Format**: \`${validation.nearestAvailable.start}\`\n\n`;
+            }
+
+            responseText += `**💡 Recommendations:**\n`;
+            responseText += `1. 🔄 **Try nearest available slot** (shown above)\n`;
+            responseText += `2. 📅 **Use GetAvailableSlots** to see all options\n`;
+            responseText += `3. 📆 **Expand date range** for more choices\n`;
+            responseText += `4. ⏰ **Check different times** on the same day\n`;
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: responseText,
+              },
+            ],
+          };
+        } catch (error) {
+          console.error("Error in ValidateSlotAvailability:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error validating slot availability: ${
+                  error instanceof Error ? error.message : "Unknown error"
+                }`,
+              },
+            ],
+          };
+        }
+      }
+    );
+
+    server.tool(
+      "DebugSlotsAPI",
+      "Debug tool to test different date formats and ranges with Cal.com slots API to identify issues.",
+      {
+        clientId: z
+          .union([z.number(), z.string().transform(Number)])
+          .describe("The ID of the client to test slots for"),
+        eventTypeId: z.number().describe("The event type ID to test"),
+        testDate: z
+          .string()
+          .optional()
+          .default("tomorrow")
+          .describe("Base date to test (e.g., 'tomorrow', '2025-09-15')"),
+      },
+      async (input) => {
+        try {
+          const { clientId, eventTypeId, testDate } = input;
+
+          // Convert and validate clientId
+          const numericClientId =
+            typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+
+          if (!numericClientId || isNaN(numericClientId)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "❌ Error: clientId is required and must be a valid number",
+                },
+              ],
+            };
+          }
+
+          let responseText = `**🔍 Slots API Debug Test**\n\n`;
+          responseText += `**🎯 Parameters:**\n`;
+          responseText += `- **Client ID**: ${numericClientId}\n`;
+          responseText += `- **Event Type ID**: ${eventTypeId}\n`;
+          responseText += `- **Test Date**: ${testDate}\n\n`;
+
+          // Get client timezone
+          const clientTimezone = await getClientTimezone(numericClientId);
+          const timezone = clientTimezone || "UTC";
+          responseText += `**🌍 Client Timezone**: ${timezone}\n\n`;
+
+          // Parse the test date
+          const parsedDate = parseDateRequest(testDate, timezone);
+          const baseDate = new Date(parsedDate.start);
+
+          responseText += `**📅 Parsed Base Date**: ${baseDate.toISOString()}\n\n`;
+
+          // Test different date range formats
+          const testCases = [
+            {
+              name: "1 Day Range (Date Only)",
+              start: baseDate.toISOString().split("T")[0],
+              end: baseDate.toISOString().split("T")[0],
+            },
+            {
+              name: "1 Day Range (Full DateTime)",
+              start: baseDate.toISOString(),
+              end: new Date(
+                baseDate.getTime() + 24 * 60 * 60 * 1000 - 1
+              ).toISOString(),
+            },
+            {
+              name: "3 Day Range (Date Only)",
+              start: baseDate.toISOString().split("T")[0],
+              end: new Date(baseDate.getTime() + 2 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+            },
+            {
+              name: "7 Day Range (Current Approach)",
+              start: baseDate.toISOString(),
+              end: new Date(
+                baseDate.getTime() + 7 * 24 * 60 * 60 * 1000
+              ).toISOString(),
+            },
+          ];
+
+          responseText += `**🧪 Testing Different Date Formats:**\n\n`;
+
+          for (const testCase of testCases) {
+            responseText += `**${testCase.name}:**\n`;
+            responseText += `- Start: \`${testCase.start}\`\n`;
+            responseText += `- End: \`${testCase.end}\`\n`;
+
+            try {
+              const slotsRequest: GetSlotsRequest = {
+                start: testCase.start,
+                end: testCase.end,
+                eventTypeId,
+              };
+
+              const slotsResponse = await getSlotsForClient(
+                numericClientId,
+                slotsRequest
+              );
+
+              if (slotsResponse.status === "success") {
+                const data = slotsResponse.data || {};
+                const totalSlots = Object.values(data).reduce(
+                  (sum, slots) => sum + (slots?.length || 0),
+                  0
+                );
+                const dateCount = Object.keys(data).length;
+
+                responseText += `- **Result**: ✅ Success\n`;
+                responseText += `- **Dates with slots**: ${dateCount}\n`;
+                responseText += `- **Total slots**: ${totalSlots}\n`;
+
+                if (totalSlots > 0) {
+                  responseText += `- **Sample slots**:\n`;
+                  Object.keys(data)
+                    .slice(0, 2)
+                    .forEach((date) => {
+                      const slots = data[date] || [];
+                      responseText += `  - ${date}: ${slots.length} slots`;
+                      if (slots.length > 0) {
+                        const firstSlot = new Date(
+                          slots[0].start
+                        ).toLocaleTimeString("en-US", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          timeZone: timezone,
+                        });
+                        responseText += ` (first: ${firstSlot})`;
+                      }
+                      responseText += `\n`;
+                    });
+                }
+              } else {
+                responseText += `- **Result**: ❌ Error\n`;
+                responseText += `- **Message**: ${
+                  slotsResponse.error?.message || "Unknown error"
+                }\n`;
+                if (slotsResponse.error?.details) {
+                  responseText += `- **Details**: ${JSON.stringify(
+                    slotsResponse.error.details,
+                    null,
+                    2
+                  )}\n`;
+                }
+              }
+            } catch (error) {
+              responseText += `- **Result**: 💥 Exception\n`;
+              responseText += `- **Error**: ${
+                error instanceof Error ? error.message : "Unknown error"
+              }\n`;
+            }
+
+            responseText += `\n`;
+          }
+
+          responseText += `**💡 Analysis:**\n`;
+          responseText += `- If all tests return empty, the event type might not have availability configured\n`;
+          responseText += `- If only certain date formats work, we need to adjust our API calls\n`;
+          responseText += `- If shorter ranges work better, we should limit our date ranges\n`;
+          responseText += `- Check Cal.com event type settings for business hours and availability\n`;
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: responseText,
+              },
+            ],
+          };
+        } catch (error) {
+          console.error("Error in DebugSlotsAPI:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error debugging slots API: ${
                   error instanceof Error ? error.message : "Unknown error"
                 }`,
               },
