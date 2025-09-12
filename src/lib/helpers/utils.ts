@@ -228,7 +228,9 @@ export const getCustomerInformation = async (fullName: string) => {
   );
   const { data: customerPipeLines } = await supabase
     .from("customer_pipeline_items_with_customers")
-    .select("full_name, pipeline_stage_id");
+    .select(
+      "full_name,email, company, job_title, customer_status, customer_type, source, address, city, state, postal_code, country, phone_number, pipeline_stage_id"
+    );
 
   const fuse = new Fuse(customerPipeLines || [], {
     keys: ["full_name"], // fields to search
