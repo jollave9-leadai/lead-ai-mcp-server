@@ -224,3 +224,29 @@ export const moveLeadToNextStage = async (
     }
   );
 };
+
+export const getCustomerInformation = async (fullName: string) => {
+  const supabase = createClient(
+    process.env.CRM_SUPABASE_URL!,
+    process.env.CRM_SUPABASE_ANON_KEY!
+  );
+    const { data: customerPipeLines } = await supabase
+      .from("customer_pipeline_items_with_customers")
+      .select("id, full_name, pipeline_stage_id");
+
+    const fuse = new Fuse(customerPipeLines || [], {
+      keys: ["full_name"], // fields to search
+      threshold: 0.3, // how fuzzy (0 = exact, 1 = very fuzzy)
+    });
+  const [customerPipeline] = fuse.search(fullName);
+  const { data: stage } = await supabase
+    .from("pipeline_stages")
+    .select("*")
+    .eq("id", customerPipeline.item.pipeline_stage_id)
+    .single();
+
+  return {
+    stage,
+    customerPipeline: customerPipeline.item,
+  };
+};

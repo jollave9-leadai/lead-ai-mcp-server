@@ -4,6 +4,7 @@ import {
   getCustomerPipeLineWithFuzzySearch,
   getNextPipeLineStage,
   moveLeadToNextStage,
+  getCustomerInformation,
 } from "@/lib/helpers";
 
 const handler = createMcpHandler(
@@ -45,6 +46,35 @@ const handler = createMcpHandler(
             {
               type: "text",
               text: `${customerPipeline.item.full_name} successfully moved to ${nextStage}`,
+            },
+          ],
+        };
+      }
+    );
+
+    server.tool(
+      "customer-information",
+      "Get information about a customer",
+      { fullName: z.string() },
+      async ({ fullName }) => {
+        const customerInformation = await getCustomerInformation(fullName);
+        if (!customerInformation?.customerPipeline?.full_name) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No customer found with the name ${fullName}.`,
+              },
+            ],
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${
+                customerInformation.customerPipeline.full_name
+              } Information: ${JSON.stringify(customerInformation)}`,
             },
           ],
         };
