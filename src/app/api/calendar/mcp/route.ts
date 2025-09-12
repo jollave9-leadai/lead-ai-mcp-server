@@ -26,6 +26,7 @@ import {
   getCalendarEvents,
   formatCalendarEventsAsString,
   parseDateRequest,
+  validateSlotAvailability,
 } from "@/lib/helpers/calendar_functions";
 
 const handler = createMcpHandler(
@@ -1483,11 +1484,7 @@ const handler = createMcpHandler(
             start,
             end,
             eventTypeId,
-            eventTypeSlug,
-            username,
-            teamSlug,
             timeZone,
-            duration,
             preferredManagedUserId,
           } = input;
 
