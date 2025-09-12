@@ -14,11 +14,16 @@ const handler = createMcpHandler(
       "Move a customer to the next pipeline stage",
       { message: z.string() },
       async ({ message }) => {
-        axios.post(process.env.CRM_AGENT_URL!, {
+        const response = await axios.post(process.env.CRM_AGENT_URL!, {
           message,
         });
         return {
-          content: [{ type: "text", text: `Message sent to CRM agent` }],
+          content: [
+            {
+              type: "text",
+              text: `Message sent to CRM agent: ${response.data.message}`,
+            },
+          ],
         };
       }
     );
