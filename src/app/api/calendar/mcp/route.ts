@@ -576,15 +576,11 @@ const handler = createMcpHandler(
 
     server.tool(
       "GetClientEventTypes",
+      "Get event types for a client, including cal_event_type_ids needed for calendar queries.",
       {
-        title: "Get Client Event Types",
-        description:
-          "Get event types for a client, including cal_event_type_ids needed for calendar queries.",
-        inputSchema: {
-          clientId: z
-            .union([z.number(), z.string().transform(Number)])
-            .describe("The ID of the client to get event types for"),
-        },
+        clientId: z
+          .union([z.number(), z.string().transform(Number)])
+          .describe("The ID of the client to get event types for"),
       },
       async (input) => {
         try {
