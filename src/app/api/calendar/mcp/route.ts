@@ -570,128 +570,6 @@ const handler = createMcpHandler(
     );
 
     server.tool(
-      "FormatDateForBooking",
-      "Helper tool to format dates into proper ISO 8601 format required for booking creation and rescheduling.",
-      {
-        dateInput: z
-          .string()
-          .describe(
-            "Date input in various formats (e.g., '2024-01-15 10:00', 'January 15, 2024 10:00 AM', '2024-01-15T10:00:00')"
-          ),
-        timezone: z
-          .string()
-          .optional()
-          .describe(
-            "Timezone to interpret the date in (e.g., 'America/New_York', 'Europe/London'). Defaults to UTC."
-          ),
-      },
-      async (input) => {
-        try {
-          const { dateInput, timezone = "UTC" } = input;
-
-          console.log(
-            `🕐 Formatting date: ${dateInput} (timezone: ${timezone})`
-          );
-
-          // Try to parse the date
-          let date: Date;
-
-          try {
-            // If timezone is provided and not UTC, we need to handle it carefully
-            if (timezone !== "UTC") {
-              // Create a date assuming the input is in the specified timezone
-              const tempDate = new Date(dateInput);
-              if (isNaN(tempDate.getTime())) {
-                throw new Error("Invalid date format");
-              }
-
-              // Convert to the specified timezone
-              const utcTime =
-                tempDate.getTime() + tempDate.getTimezoneOffset() * 60000;
-              date = new Date(utcTime);
-            } else {
-              date = new Date(dateInput);
-            }
-
-            if (isNaN(date.getTime())) {
-              throw new Error("Invalid date format");
-            }
-          } catch (error) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `❌ **Unable to Parse Date**\n\n**Input**: ${dateInput}\n**Error**: ${
-                    error instanceof Error ? error.message : "Unknown error"
-                  }\n\n**Supported Formats**:\n- ISO 8601: '2024-01-15T10:00:00Z'\n- Date string: 'January 15, 2024 10:00 AM'\n- Simple format: '2024-01-15 10:00'\n- Unix timestamp: 1705312800000`,
-                },
-              ],
-            };
-          }
-
-          // Format to proper ISO 8601
-          const formattedDate = formatToISO8601(date);
-
-          // Check if it's in the future
-          const now = new Date();
-          const isInFuture = date > now;
-
-          let responseText = `**📅 Date Formatting Result**\n\n`;
-          responseText += `**Original Input**: ${dateInput}\n`;
-          responseText += `**Timezone**: ${timezone}\n`;
-          responseText += `**Formatted Output**: \`${formattedDate}\`\n\n`;
-
-          responseText += `**✅ Ready for Booking**: ${
-            isInFuture ? "Yes" : "No"
-          }\n`;
-          if (!isInFuture) {
-            responseText += `**⚠️ Warning**: Date is in the past. Current time: ${now.toISOString()}\n`;
-          }
-
-          responseText += `\n**📋 Usage Examples**:\n`;
-          responseText += `\`\`\`\n`;
-          responseText += `CreateBooking with:\n`;
-          responseText += `- startTime: "${formattedDate}"\n`;
-          responseText += `- eventTypeId: 12345\n`;
-          responseText += `- attendeeName: "John Doe"\n`;
-          responseText += `- attendeeEmail: "john@example.com"\n`;
-          responseText += `\`\`\`\n\n`;
-
-          responseText += `**🔄 Alternative Formats**:\n`;
-          responseText += `- **Human Readable**: ${date.toLocaleString(
-            "en-US",
-            { timeZone: timezone }
-          )}\n`;
-          responseText += `- **Unix Timestamp**: ${date.getTime()}\n`;
-          responseText += `- **Date Only**: ${
-            date.toISOString().split("T")[0]
-          }\n`;
-
-          return {
-            content: [
-              {
-                type: "text",
-                text: responseText,
-              },
-            ],
-          };
-        } catch (error) {
-          console.error("Error in FormatDateForBooking:", error);
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error formatting date: ${
-                  error instanceof Error ? error.message : "Unknown error"
-                }`,
-              },
-            ],
-          };
-        }
-      }
-    );
-
-    server.tool(
       "GetClientEventTypes",
       {
         title: "Get Client Event Types",
@@ -797,6 +675,7 @@ const handler = createMcpHandler(
         }
       }
     );
+
     server.tool(
       "FormatDateForBooking",
       "Helper tool to format dates into proper ISO 8601 format required for booking creation and rescheduling.",
@@ -1177,6 +1056,7 @@ const handler = createMcpHandler(
         }
       }
     );
+
     server.tool(
       "CreateBooking",
       "Create a new booking for a client using Cal.com API. Requires event type ID, start time, and attendee information. Note: Slot availability validation is skipped for faster booking.",
