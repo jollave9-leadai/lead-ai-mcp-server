@@ -31,11 +31,6 @@ export const getAgentWithFuzzySearch = async (name: string) => {
     .select("name, id")
     .eq("name", name);
 
-  const { data: vapi_integration } = await supabase
-    .schema("lead_dialer")
-    .from("vapi_integration")
-    .select("name, phone_number");
-
   const fuse = new Fuse(agents || [], {
     keys: ["name"], // fields to search
     threshold: 0.3, // how fuzzy (0 = exact, 1 = very fuzzy)
@@ -158,7 +153,7 @@ export const initiateCall = async (
   };
   // console.log("phoneCallPayload", phoneCallPayload);
   console.log("vapiIntegration", vapiIntegration);
-  const response = await axios.post(
+  await axios.post(
     "https://api.vapi.ai/call/phone",
     phoneCallPayload,
     {
