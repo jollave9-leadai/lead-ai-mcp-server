@@ -12,21 +12,21 @@ export interface SlotRange {
 }
 
 export interface SlotsResponse {
-  status: 'success' | 'error';
+  status: "success" | "error";
   data?: {
     [date: string]: SlotTime[] | SlotRange[];
   };
   error?: {
     message: string;
-    details?: any;
+    details?: unknown;
   };
 }
 
 export interface GetSlotsRequest {
   // Required parameters
   start: string; // ISO 8601 datestring in UTC
-  end: string;   // ISO 8601 datestring in UTC
-  
+  end: string; // ISO 8601 datestring in UTC
+
   // Event type identification (choose one method)
   eventTypeId?: number;
 }

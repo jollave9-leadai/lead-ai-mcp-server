@@ -1,5 +1,5 @@
-import { createClient } from '../lib/supbase/server/route'
-import type { EventType, EventTypeSummary, EventTypeForCalendar } from '../types'
+import { createClient } from '@/lib/helpers/server'
+import type { EventType, EventTypeSummary, EventTypeForCalendar } from '@/types'
 
 /**
  * Checks if a client has event types and returns summary
@@ -40,7 +40,7 @@ export async function checkClientEventTypes(clientId: number): Promise<EventType
     
     const summary = data[0]
     const calEventTypeIds = summary.cal_event_type_ids 
-      ? summary.cal_event_type_ids.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id))
+      ? summary.cal_event_type_ids.split(',').map((id: string) => parseInt(id.trim(), 10)).filter((id: number) => !isNaN(id))
       : []
     
     console.log(`📊 Event types summary for client ${clientId}:`, {
@@ -93,7 +93,7 @@ export async function getEventTypesForClient(clientId: number): Promise<EventTyp
     console.log(`✅ Found ${data?.length || 0} event types for client ${clientId}`)
     
     if (data && data.length > 0) {
-      console.log('📋 Event types summary:', data.map(eventType => ({
+      console.log('📋 Event types summary:', data.map((eventType: EventType) => ({
         id: eventType.id,
         cal_event_type_id: eventType.cal_event_type_id,
         title: eventType.title,
@@ -189,8 +189,8 @@ export async function getEventTypesForCalendar(clientId: number): Promise<EventT
     const eventTypes = await getEventTypesForClient(clientId)
     
     return eventTypes
-      .filter(et => et.is_active)
-      .map(et => ({
+      .filter((et: EventType) => et.is_active)
+      .map((et: EventType) => ({
         cal_event_type_id: et.cal_event_type_id,
         title: et.title,
         slug: et.slug,

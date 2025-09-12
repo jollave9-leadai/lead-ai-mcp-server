@@ -10,7 +10,7 @@ export interface EventType {
   is_active: boolean;
   created_at: string;
   updated_at?: string;
-  location?: any; // jsonb type
+  location?: unknown; // jsonb type
   agent_id?: number;
   cal_managed_user_id?: number;
   availability_schedule_id?: number;

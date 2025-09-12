@@ -1,4 +1,3 @@
-import { createClient } from '../lib/supbase/server/route'
 import type { 
   CalManagedUser, 
   CreateBookingRequest, 
@@ -11,7 +10,7 @@ import type {
   RescheduleBookingResponse,
   BookingRescheduleSummary,
   EventType 
-} from '../types'
+} from '@/types'
 import { getManagedUsersByClientId } from './getCalendarEvents'
 import { getEventTypesForClient } from './getEventTypes'
 import { getConnectedCalendarsForClient, getPrimaryCalendarForClient } from './getConnectedCalendars'
@@ -69,7 +68,6 @@ export async function createCalBookingForUser(
       return result
     } else {
       console.error('❌ Cal.com API returned error:', result.error)
-      console.log("Result Errors: ", result.error?.details.errors)
       return result
 
     }
@@ -331,7 +329,6 @@ export async function cancelCalBookingForUser(
       return result
     } else {
       console.error('❌ Cal.com API returned error:', result.error)
-      console.log("Result of Cancel Errors: ", result.error?.details.errors)
       return result
     }
   } catch (error) {
@@ -474,7 +471,6 @@ export async function rescheduleCalBookingForUser(
       return result
     } else {
       console.error('❌ Cal.com API returned error:', result.error)
-      console.log("Result Reschedule Errors: ", result.error?.details.errors)
       return result
     }
   } catch (error) {

@@ -1,6 +1,5 @@
-
-import { createClient } from '../lib/supbase/server/route'
-import type { Client } from '../types'
+import { createClient } from '@/lib/helpers/server'
+import type { Client } from '@/types'
 
 /**
  * Retrieves the timezone for a specific client from the database

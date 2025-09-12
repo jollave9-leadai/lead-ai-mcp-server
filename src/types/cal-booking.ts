@@ -27,7 +27,7 @@ export interface CalBooking {
   title: string;
   description?: string;
   hosts: CalBookingHost[];
-  status: 'accepted' | 'pending' | 'cancelled' | 'rejected';
+  status: "accepted" | "pending" | "cancelled" | "rejected";
   cancellationReason?: string;
   cancelledByEmail?: string;
   reschedulingReason?: string;
@@ -44,16 +44,16 @@ export interface CalBooking {
   absentHost?: boolean;
   createdAt: string;
   updatedAt: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   rating?: number;
   icsUid?: string;
   attendees: CalBookingAttendee[];
   guests?: string[];
-  bookingFieldsResponses?: Record<string, any>;
+  bookingFieldsResponses?: Record<string, unknown>;
 }
 
 export interface CalBookingsResponse {
-  status: 'success' | 'error';
+  status: "success" | "error";
   data: CalBooking[];
   pagination: {
     totalItems: number;
@@ -65,5 +65,13 @@ export interface CalBookingsResponse {
     hasNextPage: boolean;
     hasPreviousPage: boolean;
   };
-  error?: any;
+  error?: unknown;
+}
+
+export interface SearchCriteria {
+  title?: string;
+  attendeeEmail?: string;
+  date?: string;
+  dateRange?: { start: string; end: string };
+  status?: string[];
 }

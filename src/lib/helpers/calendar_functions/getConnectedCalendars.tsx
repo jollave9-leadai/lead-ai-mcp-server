@@ -1,5 +1,5 @@
-import { createClient } from '../lib/supbase/server/route'
-import type { ConnectedCalendar, ConnectedCalendarSummary } from '../types'
+import { createClient } from '@/lib/helpers/server'
+import type { ConnectedCalendar, ConnectedCalendarSummary } from '@/types'
 
 /**
  * Checks if a client has connected calendars
@@ -59,7 +59,7 @@ export async function checkClientConnectedCalendars(clientId: number): Promise<C
         account_email: summary.primary_calendar_email,
         calendar_type: summary.primary_calendar_type,
         is_primary: true
-      } as Partial<ConnectedCalendar> : undefined
+      } as ConnectedCalendar : undefined
     }
   } catch (error) {
     console.error('💥 Unexpected error in checkClientConnectedCalendars:', error)
@@ -95,7 +95,7 @@ export async function getConnectedCalendarsForClient(clientId: number): Promise<
     console.log(`✅ Found ${data?.length || 0} connected calendars for client ${clientId}`)
     
     if (data && data.length > 0) {
-      console.log('📋 Connected calendars summary:', data.map(calendar => ({
+      console.log('📋 Connected calendars summary:', data.map((calendar: ConnectedCalendar) => ({
         id: calendar.id,
         calendar_type: calendar.calendar_type,
         account_email: calendar.account_email,

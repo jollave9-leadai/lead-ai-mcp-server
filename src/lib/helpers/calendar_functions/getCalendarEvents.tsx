@@ -1,8 +1,7 @@
-
-import { createClient } from '../lib/supbase/server/route'
-import type { CalManagedUser, CalBooking, CalBookingsResponse } from '../types'
-import { hasActiveCalendarConnections, checkClientConnectedCalendars } from './getConnectedCalendars'
-import { hasActiveEventTypes, getCalEventTypeIdsForClient, checkClientEventTypes } from './getEventTypes'
+import { createClient } from '@/lib/helpers/server'
+import type { CalManagedUser, CalBooking, CalBookingsResponse, SearchCriteria } from '@/types'
+import { hasActiveCalendarConnections } from './getConnectedCalendars'
+import { hasActiveEventTypes, getCalEventTypeIdsForClient } from './getEventTypes'
 
 /**
  * Retrieves all managed users for a specific client
@@ -75,7 +74,6 @@ export async function fetchCalBookingsForUser(
       return result.data
     } else {
       console.error('Cal.com API returned error:', result.error)
-      console.log("Result of Booking Response Errors: ", result.error?.details.errors)
       return []
     }
   } catch (error) {
@@ -336,12 +334,11 @@ export async function findBookingForReschedule(
   clientId: number,
   title: string,
   date?: string,
-  timezone: string = 'UTC'
 ): Promise<CalBooking | null> {
   try {
     console.log(`🎯 Finding booking for reschedule: "${title}" on ${date || 'any date'}`)
     
-    let searchCriteria: any = { title }
+    const searchCriteria: SearchCriteria = { title }
     
     // Parse date if provided
     if (date) {
@@ -361,7 +358,7 @@ export async function findBookingForReschedule(
             searchCriteria.date = parsedDate.toISOString().split('T')[0]
           }
         } catch (error) {
-          console.log(`⚠️ Could not parse date "${date}", searching all dates`)
+          console.log(`⚠️ Could not parse date "${date}", searching all dates Error: ${error}`)
         }
       }
     }

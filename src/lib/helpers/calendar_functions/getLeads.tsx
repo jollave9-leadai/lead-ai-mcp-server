@@ -1,5 +1,5 @@
-import { createClient } from '../lib/supbase/server/route'
-import type { Lead, LeadSummary, LeadFilters, LeadQueryOptions, LeadsResponse } from '../types'
+import { createClient } from '@/lib/helpers/server'
+import type { Lead, LeadSummary, LeadQueryOptions, LeadsResponse } from '@/types'
 
 /**
  * Gets leads summary for a specific client

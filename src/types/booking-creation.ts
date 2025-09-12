@@ -16,18 +16,18 @@ export interface CreateBookingRequest {
   start: string; // ISO 8601 datetime string
   attendee: BookingAttendee;
   meetingUrl?: string;
-  bookingFieldsResponses?: Record<string, any>;
+  bookingFieldsResponses?: Record<string, unknown>;
   metadata?: BookingMetadata;
   title?: string;
   recurringEventId?: string;
   description?: string;
-  status?: 'ACCEPTED' | 'PENDING' | 'CANCELLED';
+  status?: "ACCEPTED" | "PENDING" | "CANCELLED";
   seatsPerTimeSlot?: number;
   seatsShowAttendees?: boolean;
 }
 
 export interface CreateBookingResponse {
-  status: 'success' | 'error';
+  status: "success" | "error";
   data?: {
     id: number;
     uid: string;
@@ -49,7 +49,7 @@ export interface CreateBookingResponse {
   };
   error?: {
     message: string;
-    details?: any;
+    details?: unknown;
   };
 }
 
@@ -73,7 +73,7 @@ export interface CancelBookingRequest {
 }
 
 export interface CancelBookingResponse {
-  status: 'success' | 'error';
+  status: "success" | "error";
   data?: {
     id: number;
     uid: string;
@@ -107,11 +107,11 @@ export interface CancelBookingResponse {
     }>;
     createdAt: string;
     updatedAt: string;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   };
   error?: {
     message: string;
-    details?: any;
+    details?: unknown;
   };
 }
 
@@ -135,7 +135,7 @@ export interface RescheduleBookingRequest {
 }
 
 export interface RescheduleBookingResponse {
-  status: 'success' | 'error';
+  status: "success" | "error";
   data?: {
     id: number;
     uid: string;
@@ -173,11 +173,11 @@ export interface RescheduleBookingResponse {
     location?: string;
     createdAt: string;
     updatedAt: string;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   };
   error?: {
     message: string;
-    details?: any;
+    details?: unknown;
   };
 }
 

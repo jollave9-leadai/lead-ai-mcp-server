@@ -1,4 +1,3 @@
-import { createClient } from '../lib/supbase/server/route'
 import type { 
   CalManagedUser, 
   GetSlotsRequest, 
@@ -7,7 +6,7 @@ import type {
   SlotValidationResult,
   SlotTime,
   SlotRange
-} from '../types'
+} from '@/types'
 import { getManagedUsersByClientId } from './getCalendarEvents'
 import { getPrimaryCalendarForClient } from './getConnectedCalendars'
 

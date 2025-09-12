@@ -1,9 +1,9 @@
 // Resource management utilities for leads caching and subscription
-import type { Lead, LeadSummary } from '../types'
+import type { Lead, LeadSummary } from '@/types'
 
 // Cache management interface
 interface CacheEntry {
-  data: any
+  data: Record<string, unknown>
   timestamp: number
   ttl: number
   uri: string
@@ -41,7 +41,7 @@ export function isCacheValid(entry: CacheEntry): boolean {
 /**
  * Gets cached data if valid, otherwise returns null
  */
-export function getCachedResource(uri: string): any | null {
+export function getCachedResource(uri: string): Record<string, unknown> | null {
   const entry = resourceCache.get(uri)
   
   if (!entry) {
@@ -62,7 +62,7 @@ export function getCachedResource(uri: string): any | null {
 /**
  * Sets cached data with TTL
  */
-export function setCachedResource(uri: string, data: any, ttl: number): void {
+export function setCachedResource(uri: string, data: Record<string, unknown>, ttl: number): void {
   const entry: CacheEntry = {
     data,
     timestamp: Date.now(),
