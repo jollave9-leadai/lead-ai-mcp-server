@@ -3,6 +3,9 @@ import { createMcpHandler } from "mcp-handler";
 import {
   validateISO8601Date,
   formatToISO8601,
+  refreshCalComToken,
+  getManagedUserByClientId,
+  updateManagedUserTokens,
 } from "@/lib/helpers/calendar_functions/helper";
 import {
   RescheduleBookingRequest,
@@ -1840,6 +1843,51 @@ const handler = createMcpHandler(
                 text: `Error debugging slots API: ${
                   error instanceof Error ? error.message : "Unknown error"
                 }`,
+              },
+            ],
+          };
+        }
+      }
+    );
+
+    server.tool(
+      "RefreshToken",
+      "Refresh a token for a client from Cal.com. Uses essential parameters: clientId.",
+      {
+        clientId: z
+          .number()
+          .describe("The ID of the client to refresh a token for"),
+      },
+      async ({ clientId }) => {
+        try {
+          const managedUser = await getManagedUserByClientId(clientId);
+          if (!managedUser) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "No managed user found for this client",
+                },
+              ],
+            };
+          }
+          const result = await refreshCalComToken(managedUser);
+          await updateManagedUserTokens(managedUser, { access_token: result?.access_token || "", refresh_token: result?.refresh_token || "" });
+          return {
+            content: [
+              {
+                type: "text",
+                text: result?.access_token || "",
+              },
+            ],
+          };
+        } catch (error) {
+          console.error("Error in RefreshToken:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Error refreshing token: " + error,
               },
             ],
           };

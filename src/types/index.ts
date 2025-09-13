@@ -1,6 +1,6 @@
 // Export all types from their respective files
 export type { Client } from "./client";
-export type { CalManagedUser } from "./cal-managed-user";
+export type { CalManagedUser, BaseManagedUser } from "./cal-managed-user";
 export type {
   ConnectedCalendar,
   ConnectedCalendarSummary,
