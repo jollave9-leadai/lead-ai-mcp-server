@@ -14,6 +14,7 @@ import type {
 import { getManagedUsersByClientId } from './getCalendarEvents'
 import { getEventTypesForClient } from './getEventTypes'
 import { getConnectedCalendarsForClient, getPrimaryCalendarForClient } from './getConnectedCalendars'
+import { isTokenExpiredError } from './helper'
 
 /**
  * Creates a booking via Cal.com API using a managed user's access token
@@ -68,6 +69,12 @@ export async function createCalBookingForUser(
       return result
     } else {
       console.error('❌ Cal.com API returned error:', result.error)
+      if (
+        result.error instanceof Error &&
+        isTokenExpiredError(response, result.error.message)
+      ) {
+        throw new Error(result.error.message);
+      }
       return result
 
     }
@@ -329,6 +336,12 @@ export async function cancelCalBookingForUser(
       return result
     } else {
       console.error('❌ Cal.com API returned error:', result.error)
+      if (
+        result.error instanceof Error &&
+        isTokenExpiredError(response, result.error.message)
+      ) {
+        throw new Error(result.error.message);
+      }
       return result
     }
   } catch (error) {
@@ -471,6 +484,12 @@ export async function rescheduleCalBookingForUser(
       return result
     } else {
       console.error('❌ Cal.com API returned error:', result.error)
+      if (
+        result.error instanceof Error &&
+        isTokenExpiredError(response, result.error.message)
+      ) {
+        throw new Error(result.error.message);
+      }
       return result
     }
   } catch (error) {

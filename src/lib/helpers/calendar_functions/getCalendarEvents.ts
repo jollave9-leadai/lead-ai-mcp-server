@@ -2,6 +2,7 @@ import { createClient } from '@/lib/helpers/server'
 import type { CalManagedUser, CalBooking, CalBookingsResponse, SearchCriteria } from '@/types'
 import { hasActiveCalendarConnections } from './getConnectedCalendars'
 import { hasActiveEventTypes, getCalEventTypeIdsForClient } from './getEventTypes'
+import { isTokenExpiredError, refreshCalComToken } from './helper'
 
 /**
  * Retrieves all managed users for a specific client
@@ -74,6 +75,14 @@ export async function fetchCalBookingsForUser(
       return result.data
     } else {
       console.error('Cal.com API returned error:', result.error)
+      if (
+        result.error instanceof Error && isTokenExpiredError(
+          response,
+          result.error.message
+        )
+      ) {
+        throw new Error(result.error.message)
+      }
       return []
     }
   } catch (error) {

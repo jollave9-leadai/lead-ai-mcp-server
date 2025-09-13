@@ -1,4 +1,6 @@
 import { CalBooking } from "@/types/cal-booking";
+import { createClient } from "@/lib/helpers/server";
+import { BaseManagedUser } from "@/types";
 
 // Helper function to format date to proper ISO 8601 format for Cal.com API
 export function formatToISO8601(dateInput: string | Date): string {
@@ -255,4 +257,120 @@ export function parseDateRequest(
     end: endOfDay.toISOString(),
     description: formatDateDescription(userNow),
   };
+}
+
+/**
+ * Check if an error indicates token expiration
+ */
+export function isTokenExpiredError(response: Response, errorText?: string): boolean {
+  return (
+    response.status === 401 || 
+    response.status === 498 ||
+    (!!errorText && (
+      errorText.includes('ACCESS_TOKEN_IS_EXPIRED') ||
+      errorText.includes('TokenExpiredException') ||
+      errorText.includes('Unauthorized')
+    ))
+  )
+} 
+
+/**
+ * Refresh Cal.com managed user access token using refresh token
+ */
+export async function refreshCalComToken(managedUser: BaseManagedUser): Promise<{ access_token: string; refresh_token: string } | null> {
+  try {
+    console.log('🔄 Attempting to refresh Cal.com managed user token for user:', managedUser.cal_user_id)
+    
+    // Validate required environment variables
+    if (!process.env.CAL_OAUTH_CLIENT_ID || !process.env.CAL_OAUTH_CLIENT_SECRET) {
+      console.error('❌ Missing required Cal.com OAuth credentials in environment variables')
+      return null
+    }
+    
+    // Use the specific managed user refresh endpoint
+    const refreshResponse = await fetch(`https://api.cal.com/v2/oauth/${process.env.CAL_OAUTH_CLIENT_ID}/refresh`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-cal-secret-key': process.env.CAL_OAUTH_CLIENT_SECRET,
+      },
+      body: JSON.stringify({
+        refreshToken: managedUser.refresh_token
+      })
+    })
+
+    if (!refreshResponse.ok) {
+      const errorText = await refreshResponse.text()
+      console.error('❌ Managed user token refresh failed:', refreshResponse.status, errorText)
+      return null
+    }
+
+    const responseData = await refreshResponse.json()
+    console.log('✅ Managed user token refreshed successfully')
+    
+    if (responseData.status === 'success' && responseData.data) {
+      return {
+        access_token: responseData.data.accessToken,
+        refresh_token: responseData.data.refreshToken
+      }
+    } else {
+      console.error('❌ Unexpected refresh response format:', responseData)
+      return null
+    }
+  } catch (error: unknown) {
+    console.error('❌ Error refreshing managed user token:', error)
+    return null
+  }
+}
+
+/**
+ * Update managed user tokens in database
+ */
+export async function updateManagedUserTokens(
+  managedUser: BaseManagedUser, 
+  newTokens: { access_token: string; refresh_token: string }
+): Promise<BaseManagedUser | null> {
+  try {
+    const supabase = createClient();
+    // Use cal_user_id as the primary identifier since it's always available
+    const { data: updatedUser, error } = await supabase
+      .schema('lead_dialer')
+      .from('cal_managed_users')
+      .update({
+        access_token: newTokens.access_token,
+        refresh_token: newTokens.refresh_token,
+        updated_at: new Date().toISOString()
+      })
+      .eq('cal_user_id', managedUser.cal_user_id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('❌ Failed to update tokens in database:', error)
+      return null
+    }
+
+    console.log('✅ Tokens updated in database')
+    return updatedUser
+  } catch (error: unknown) {
+    console.error('❌ Error updating tokens in database:', error)
+    return null
+  }
+}
+
+export async function getManagedUserByClientId(clientId: number): Promise<BaseManagedUser | null> {
+  const supabase = createClient();
+  const { data: managedUser, error } = await supabase
+    .schema('lead_dialer')
+    .from('cal_managed_users')
+    .select('*')
+    .eq('client_id', clientId)
+    .single()
+
+  if (error) {
+    console.error('❌ Failed to get managed user by client ID:', error)
+    return null
+  }
+
+  return managedUser
 }
