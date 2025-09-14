@@ -1,7 +1,7 @@
-import type { 
-  CalManagedUser, 
-  CreateBookingRequest, 
-  CreateBookingResponse, 
+import type {
+  CalManagedUser,
+  CreateBookingRequest,
+  CreateBookingResponse,
   BookingCreationSummary,
   CancelBookingRequest,
   CancelBookingResponse,
@@ -9,12 +9,19 @@ import type {
   RescheduleBookingRequest,
   RescheduleBookingResponse,
   BookingRescheduleSummary,
-  EventType 
-} from '@/types'
-import { getManagedUsersByClientId } from './getCalendarEvents'
-import { getEventTypesForClient } from './getEventTypes'
-import { getConnectedCalendarsForClient, getPrimaryCalendarForClient } from './getConnectedCalendars'
-import { isTokenExpiredError } from './helper'
+  EventType,
+} from "@/types";
+import { getManagedUsersByClientId } from "./getCalendarEvents";
+import { getEventTypesForClient } from "./getEventTypes";
+import {
+  getConnectedCalendarsForClient,
+  getPrimaryCalendarForClient,
+} from "./getConnectedCalendars";
+import {
+  isTokenExpiredError,
+  refreshCalComToken,
+  updateManagedUserTokens,
+} from "./helper";
 
 /**
  * Creates a booking via Cal.com API using a managed user's access token
@@ -27,66 +34,126 @@ export async function createCalBookingForUser(
   bookingRequest: CreateBookingRequest
 ): Promise<CreateBookingResponse> {
   try {
-    const baseUrl = 'https://api.cal.com/v2/bookings'
+    const baseUrl = "https://api.cal.com/v2/bookings";
 
     console.log(`📅 Creating booking for user ${managedUser.email}...`, {
       eventTypeId: bookingRequest.eventTypeId,
       start: bookingRequest.start,
-      attendeeEmail: bookingRequest.attendee.email
-    })
+      attendeeEmail: bookingRequest.attendee.email,
+    });
 
-    console.log("Booking Request: ", bookingRequest)
+    console.log("Booking Request: ", bookingRequest);
     const response = await fetch(baseUrl, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Authorization': `Bearer ${managedUser.access_token}`,
-        'cal-api-version': '2024-08-13',
-        'Content-Type': 'application/json'
+        Authorization: `Bearer ${managedUser.access_token}`,
+        "cal-api-version": "2024-08-13",
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(bookingRequest)
-    })
+      body: JSON.stringify(bookingRequest),
+    });
 
-    
-    const result: CreateBookingResponse = await response.json()
+    const result: CreateBookingResponse = await response.json();
 
     if (!response.ok) {
-      console.error(`❌ Cal.com API error for user ${managedUser.email}:`, response.status, response.statusText)
+      console.error(
+        `❌ Cal.com API error for user ${managedUser.email}:`,
+        response.status,
+        response.statusText
+      );
       return {
-        status: 'error',
+        status: "error",
         error: {
           message: `HTTP ${response.status}: ${response.statusText}`,
-          details: result
+          details: result,
+        },
+      };
+    }
+
+    if (result.status === "success") {
+      console.log(
+        `✅ Booking created successfully for user ${managedUser.email}:`,
+        {
+          bookingId: result.data?.id,
+          bookingUid: result.data?.uid,
+          title: result.data?.title,
+        }
+      );
+      return result;
+    } else {
+      console.error("❌ Cal.com API returned error:", result.error);
+      if (result.error && isTokenExpiredError(response, result.error.message)) {
+        console.log("Token expired, refreshing token");
+
+        // Attempt to refresh the token
+        const newTokens = await refreshCalComToken(managedUser);
+        if (newTokens) {
+          console.log("Token refreshed successfully, updating database");
+          const updatedUser = await updateManagedUserTokens(
+            managedUser,
+            newTokens
+          );
+          if (updatedUser) {
+            console.log("Database updated, retrying request with new token");
+            // Retry the request with the new token
+            const response = await fetch(baseUrl, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${managedUser.access_token}`,
+                "cal-api-version": "2024-08-13",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(bookingRequest),
+            });
+
+            const result: CreateBookingResponse = await response.json();
+
+            if (!response.ok) {
+              console.error(
+                `❌ Cal.com API error for user ${managedUser.email}:`,
+                response.status,
+                response.statusText
+              );
+              return {
+                status: "error",
+                error: {
+                  message: `HTTP ${response.status}: ${response.statusText}`,
+                  details: result,
+                },
+              };
+            }
+
+            if (result.status === "success") {
+              console.log(
+                `✅ Booking created successfully for user ${managedUser.email}:`,
+                {
+                  bookingId: result.data?.id,
+                  bookingUid: result.data?.uid,
+                  title: result.data?.title,
+                }
+              );
+              return result;
+            } else {
+              throw new Error("Token expired");
+            }
+          }
         }
       }
-    }
-
-    if (result.status === 'success') {
-      console.log(`✅ Booking created successfully for user ${managedUser.email}:`, {
-        bookingId: result.data?.id,
-        bookingUid: result.data?.uid,
-        title: result.data?.title
-      })
-      return result
-    } else {
-      console.error('❌ Cal.com API returned error:', result.error)
-      if (
-        result.error instanceof Error &&
-        isTokenExpiredError(response, result.error.message)
-      ) {
-        throw new Error(result.error.message);
-      }
-      return result
-
+      return result;
     }
   } catch (error) {
-    console.error(`💥 Error creating Cal.com booking for user ${managedUser.email}:`, error)
+    console.error(
+      `💥 Error creating Cal.com booking for user ${managedUser.email}:`,
+      error
+    );
     return {
-      status: 'error',
+      status: "error",
       error: {
-        message: error instanceof Error ? error.message : 'Unknown error occurred',
-        details: error
-      }
-    }
+        message:
+          error instanceof Error ? error.message : "Unknown error occurred",
+        details: error,
+      },
+    };
   }
 }
 
@@ -103,68 +170,84 @@ export async function createBookingForClient(
   preferredManagedUserId?: number
 ): Promise<BookingCreationSummary> {
   try {
-    console.log(`🎯 Creating booking for client ${clientId}...`)
+    console.log(`🎯 Creating booking for client ${clientId}...`);
 
     // Get both managed users and connected calendars for the client
     const [managedUsers, connectedCalendars] = await Promise.all([
       getManagedUsersByClientId(clientId),
-      getConnectedCalendarsForClient(clientId)
-    ])
+      getConnectedCalendarsForClient(clientId),
+    ]);
 
     if (managedUsers.length === 0) {
       return {
         success: false,
-        error: `No managed users found for client ${clientId}`
-      }
+        error: `No managed users found for client ${clientId}`,
+      };
     }
 
     if (connectedCalendars.length === 0) {
       return {
         success: false,
-        error: `No connected calendars found for client ${clientId}. Please connect a calendar first.`
-      }
+        error: `No connected calendars found for client ${clientId}. Please connect a calendar first.`,
+      };
     }
 
     // Select the managed user to use for booking creation
-    let selectedUser: CalManagedUser | undefined
+    let selectedUser: CalManagedUser | undefined;
 
     if (preferredManagedUserId) {
-      selectedUser = managedUsers.find(user => user.id === preferredManagedUserId)
+      selectedUser = managedUsers.find(
+        (user) => user.id === preferredManagedUserId
+      );
       if (!selectedUser) {
-        console.log(`⚠️ Preferred managed user ${preferredManagedUserId} not found, using calendar-based selection`)
+        console.log(
+          `⚠️ Preferred managed user ${preferredManagedUserId} not found, using calendar-based selection`
+        );
       }
     }
 
     // If no preferred user, select based on connected calendar
     if (!selectedUser) {
       // Get the primary connected calendar
-      const primaryCalendar = await getPrimaryCalendarForClient(clientId)
-      
+      const primaryCalendar = await getPrimaryCalendarForClient(clientId);
+
       if (primaryCalendar) {
         // Find the managed user that matches the primary calendar's cal_user_id
-        selectedUser = managedUsers.find(user => user.cal_user_id === primaryCalendar.cal_user_id)
-        
+        selectedUser = managedUsers.find(
+          (user) => user.cal_user_id === primaryCalendar.cal_user_id
+        );
+
         if (selectedUser) {
-          console.log(`📅 Selected managed user based on primary calendar: ${selectedUser.email} (cal_user_id: ${selectedUser.cal_user_id})`)
-          console.log(`📅 Primary calendar: ${primaryCalendar.account_email} (${primaryCalendar.calendar_type})`)
+          console.log(
+            `📅 Selected managed user based on primary calendar: ${selectedUser.email} (cal_user_id: ${selectedUser.cal_user_id})`
+          );
+          console.log(
+            `📅 Primary calendar: ${primaryCalendar.account_email} (${primaryCalendar.calendar_type})`
+          );
         } else {
-          console.log(`⚠️ No managed user found for primary calendar cal_user_id: ${primaryCalendar.cal_user_id}`)
+          console.log(
+            `⚠️ No managed user found for primary calendar cal_user_id: ${primaryCalendar.cal_user_id}`
+          );
         }
       }
-      
+
       // If still no user selected, use the first available
       if (!selectedUser) {
-        selectedUser = managedUsers[0]
-        console.log(`⚠️ Using first available managed user: ${selectedUser.email} (ID: ${selectedUser.id})`)
+        selectedUser = managedUsers[0];
+        console.log(
+          `⚠️ Using first available managed user: ${selectedUser.email} (ID: ${selectedUser.id})`
+        );
       }
     }
 
-    console.log(`👤 Final selected managed user: ${selectedUser.email} (ID: ${selectedUser.id}, cal_user_id: ${selectedUser.cal_user_id})`)
+    console.log(
+      `👤 Final selected managed user: ${selectedUser.email} (ID: ${selectedUser.id}, cal_user_id: ${selectedUser.cal_user_id})`
+    );
 
     // Create the booking
-    const result = await createCalBookingForUser(selectedUser, bookingRequest)
+    const result = await createCalBookingForUser(selectedUser, bookingRequest);
 
-    if (result.status === 'success' && result.data) {
+    if (result.status === "success" && result.data) {
       return {
         success: true,
         bookingId: result.data.id,
@@ -173,20 +256,22 @@ export async function createBookingForClient(
         startTime: result.data.startTime,
         endTime: result.data.endTime,
         attendeeEmail: bookingRequest.attendee.email,
-        attendeeName: bookingRequest.attendee.name
-      }
+        attendeeName: bookingRequest.attendee.name,
+      };
     } else {
       return {
         success: false,
-        error: result.error?.message || 'Unknown error occurred during booking creation'
-      }
+        error:
+          result.error?.message ||
+          "Unknown error occurred during booking creation",
+      };
     }
   } catch (error) {
-    console.error('💥 Unexpected error in createBookingForClient:', error)
+    console.error("💥 Unexpected error in createBookingForClient:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred'
-    }
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
   }
 }
 
@@ -201,38 +286,40 @@ export function validateBookingRequest(
   clientEventTypes: EventType[]
 ): string | null {
   // Check if event type exists for the client
-  const eventType = clientEventTypes.find(et => et.cal_event_type_id === bookingRequest.eventTypeId)
+  const eventType = clientEventTypes.find(
+    (et) => et.cal_event_type_id === bookingRequest.eventTypeId
+  );
   if (!eventType) {
-    return `Event type ${bookingRequest.eventTypeId} not found for this client`
+    return `Event type ${bookingRequest.eventTypeId} not found for this client`;
   }
 
   if (!eventType.is_active) {
-    return `Event type ${bookingRequest.eventTypeId} is not active`
+    return `Event type ${bookingRequest.eventTypeId} is not active`;
   }
 
   // Validate required fields
   if (!bookingRequest.attendee.name || !bookingRequest.attendee.email) {
-    return 'Attendee name and email are required'
+    return "Attendee name and email are required";
   }
 
   // Validate email format
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(bookingRequest.attendee.email)) {
-    return 'Invalid email format'
+    return "Invalid email format";
   }
 
   // Validate start time
-  const startTime = new Date(bookingRequest.start)
+  const startTime = new Date(bookingRequest.start);
   if (isNaN(startTime.getTime())) {
-    return 'Invalid start time format'
+    return "Invalid start time format";
   }
 
   // Check if start time is in the future
   if (startTime <= new Date()) {
-    return 'Start time must be in the future'
+    return "Start time must be in the future";
   }
 
-  return null // Valid
+  return null; // Valid
 }
 
 /**
@@ -248,37 +335,44 @@ export async function createValidatedBookingForClient(
   preferredManagedUserId?: number
 ): Promise<BookingCreationSummary> {
   try {
-    console.log(`🔍 Validating booking request for client ${clientId}...`)
+    console.log(`🔍 Validating booking request for client ${clientId}...`);
 
     // Get client's event types for validation
-    const eventTypes = await getEventTypesForClient(clientId)
-    
+    const eventTypes = await getEventTypesForClient(clientId);
+
     if (eventTypes.length === 0) {
       return {
         success: false,
-        error: `No event types found for client ${clientId}`
-      }
+        error: `No event types found for client ${clientId}`,
+      };
     }
 
     // Validate the booking request
-    const validationError = validateBookingRequest(bookingRequest, eventTypes)
+    const validationError = validateBookingRequest(bookingRequest, eventTypes);
     if (validationError) {
       return {
         success: false,
-        error: `Validation failed: ${validationError}`
-      }
+        error: `Validation failed: ${validationError}`,
+      };
     }
 
-    console.log(`✅ Booking request validated successfully`)
+    console.log(`✅ Booking request validated successfully`);
 
     // Create the booking
-    return await createBookingForClient(clientId, bookingRequest, preferredManagedUserId)
+    return await createBookingForClient(
+      clientId,
+      bookingRequest,
+      preferredManagedUserId
+    );
   } catch (error) {
-    console.error('💥 Unexpected error in createValidatedBookingForClient:', error)
+    console.error(
+      "💥 Unexpected error in createValidatedBookingForClient:",
+      error
+    );
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred'
-    }
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
   }
 }
 
@@ -295,64 +389,130 @@ export async function cancelCalBookingForUser(
   cancelRequest: CancelBookingRequest
 ): Promise<CancelBookingResponse> {
   try {
-    const baseUrl = `https://api.cal.com/v2/bookings/${bookingUid}/cancel`
+    const baseUrl = `https://api.cal.com/v2/bookings/${bookingUid}/cancel`;
 
-    console.log(`🗑️ Canceling booking ${bookingUid} for user ${managedUser.email}...`, {
-      cancellationReason: cancelRequest.cancellationReason,
-      cancelSubsequentBookings: cancelRequest.cancelSubsequentBookings,
-      seatUid: cancelRequest.seatUid
-    })
+    console.log(
+      `🗑️ Canceling booking ${bookingUid} for user ${managedUser.email}...`,
+      {
+        cancellationReason: cancelRequest.cancellationReason,
+        cancelSubsequentBookings: cancelRequest.cancelSubsequentBookings,
+        seatUid: cancelRequest.seatUid,
+      }
+    );
 
     const response = await fetch(baseUrl, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Authorization': `Bearer ${managedUser.access_token}`,
-        'cal-api-version': '2024-08-13',
-        'Content-Type': 'application/json'
+        Authorization: `Bearer ${managedUser.access_token}`,
+        "cal-api-version": "2024-08-13",
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(cancelRequest)
-    })
+      body: JSON.stringify(cancelRequest),
+    });
 
-    const result: CancelBookingResponse = await response.json()
+    const result: CancelBookingResponse = await response.json();
 
     if (!response.ok) {
-      console.error(`❌ Cal.com API error for user ${managedUser.email}:`, response.status, response.statusText)
+      console.error(
+        `❌ Cal.com API error for user ${managedUser.email}:`,
+        response.status,
+        response.statusText
+      );
       return {
-        status: 'error',
+        status: "error",
         error: {
           message: `HTTP ${response.status}: ${response.statusText}`,
-          details: result
-        }
-      }
+          details: result,
+        },
+      };
     }
 
-    if (result.status === 'success') {
-      console.log(`✅ Booking canceled successfully for user ${managedUser.email}:`, {
-        bookingId: result.data?.id,
-        bookingUid: result.data?.uid,
-        title: result.data?.title,
-        cancellationReason: result.data?.cancellationReason
-      })
-      return result
+    if (result.status === "success") {
+      console.log(
+        `✅ Booking canceled successfully for user ${managedUser.email}:`,
+        {
+          bookingId: result.data?.id,
+          bookingUid: result.data?.uid,
+          title: result.data?.title,
+          cancellationReason: result.data?.cancellationReason,
+        }
+      );
+      return result;
     } else {
-      console.error('❌ Cal.com API returned error:', result.error)
-      if (
-        result.error instanceof Error &&
-        isTokenExpiredError(response, result.error.message)
-      ) {
-        throw new Error(result.error.message);
+      console.error("❌ Cal.com API returned error:", result.error);
+      if (result.error && isTokenExpiredError(response, result.error.message)) {
+        console.log("Token expired, refreshing token");
+
+        // Attempt to refresh the token
+        const newTokens = await refreshCalComToken(managedUser);
+        if (newTokens) {
+          console.log("Token refreshed successfully, updating database");
+          const updatedUser = await updateManagedUserTokens(
+            managedUser,
+            newTokens
+          );
+          if (updatedUser) {
+            console.log("Database updated, retrying request with new token");
+            // Retry the request with the new token
+            const response = await fetch(baseUrl, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${managedUser.access_token}`,
+                "cal-api-version": "2024-08-13",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(cancelRequest),
+            });
+
+            const result: CancelBookingResponse = await response.json();
+
+            if (!response.ok) {
+              console.error(
+                `❌ Cal.com API error for user ${managedUser.email}:`,
+                response.status,
+                response.statusText
+              );
+              return {
+                status: "error",
+                error: {
+                  message: `HTTP ${response.status}: ${response.statusText}`,
+                  details: result,
+                },
+              };
+            }
+
+            if (result.status === "success") {
+              console.log(
+                `✅ Booking canceled successfully for user ${managedUser.email}:`,
+                {
+                  bookingId: result.data?.id,
+                  bookingUid: result.data?.uid,
+                  title: result.data?.title,
+                  cancellationReason: result.data?.cancellationReason,
+                }
+              );
+              return result;
+            } else {
+              throw new Error("Token expired");
+            }
+          }
+        }
       }
-      return result
+      return result;
     }
   } catch (error) {
-    console.error(`💥 Error canceling Cal.com booking for user ${managedUser.email}:`, error)
+    console.error(
+      `💥 Error canceling Cal.com booking for user ${managedUser.email}:`,
+      error
+    );
     return {
-      status: 'error',
+      status: "error",
       error: {
-        message: error instanceof Error ? error.message : 'Unknown error occurred',
-        details: error
-      }
-    }
+        message:
+          error instanceof Error ? error.message : "Unknown error occurred",
+        details: error,
+      },
+    };
   }
 }
 
@@ -371,39 +531,49 @@ export async function cancelBookingForClient(
   preferredManagedUserId?: number
 ): Promise<BookingCancellationSummary> {
   try {
-    console.log(`🎯 Canceling booking ${bookingUid} for client ${clientId}...`)
+    console.log(`🎯 Canceling booking ${bookingUid} for client ${clientId}...`);
 
     // Get managed users for the client
-    const managedUsers = await getManagedUsersByClientId(clientId)
+    const managedUsers = await getManagedUsersByClientId(clientId);
 
     if (managedUsers.length === 0) {
       return {
         success: false,
-        error: `No managed users found for client ${clientId}`
-      }
+        error: `No managed users found for client ${clientId}`,
+      };
     }
 
     // Select the managed user to use for booking cancellation
-    let selectedUser: CalManagedUser | undefined
+    let selectedUser: CalManagedUser | undefined;
 
     if (preferredManagedUserId) {
-      selectedUser = managedUsers.find(user => user.id === preferredManagedUserId)
+      selectedUser = managedUsers.find(
+        (user) => user.id === preferredManagedUserId
+      );
       if (!selectedUser) {
-        console.log(`⚠️ Preferred managed user ${preferredManagedUserId} not found, using first available`)
+        console.log(
+          `⚠️ Preferred managed user ${preferredManagedUserId} not found, using first available`
+        );
       }
     }
 
     // If no preferred user or preferred user not found, use the first one
     if (!selectedUser) {
-      selectedUser = managedUsers[0]
+      selectedUser = managedUsers[0];
     }
 
-    console.log(`👤 Using managed user: ${selectedUser.email} (ID: ${selectedUser.id})`)
+    console.log(
+      `👤 Using managed user: ${selectedUser.email} (ID: ${selectedUser.id})`
+    );
 
     // Cancel the booking
-    const result = await cancelCalBookingForUser(selectedUser, bookingUid, cancelRequest)
+    const result = await cancelCalBookingForUser(
+      selectedUser,
+      bookingUid,
+      cancelRequest
+    );
 
-    if (result.status === 'success' && result.data) {
+    if (result.status === "success" && result.data) {
       return {
         success: true,
         bookingId: result.data.id,
@@ -411,20 +581,22 @@ export async function cancelBookingForClient(
         eventTitle: result.data.title,
         cancellationReason: result.data.cancellationReason,
         cancelledByEmail: result.data.cancelledByEmail,
-        wasSeatedBooking: !!cancelRequest.seatUid
-      }
+        wasSeatedBooking: !!cancelRequest.seatUid,
+      };
     } else {
       return {
         success: false,
-        error: result.error?.message || 'Unknown error occurred during booking cancellation'
-      }
+        error:
+          result.error?.message ||
+          "Unknown error occurred during booking cancellation",
+      };
     }
   } catch (error) {
-    console.error('💥 Unexpected error in cancelBookingForClient:', error)
+    console.error("💥 Unexpected error in cancelBookingForClient:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred'
-    }
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
   }
 }
 
@@ -441,66 +613,132 @@ export async function rescheduleCalBookingForUser(
   rescheduleRequest: RescheduleBookingRequest
 ): Promise<RescheduleBookingResponse> {
   try {
-    const baseUrl = `https://api.cal.com/v2/bookings/${bookingUid}/reschedule`
+    const baseUrl = `https://api.cal.com/v2/bookings/${bookingUid}/reschedule`;
 
-    console.log(`📅 Rescheduling booking ${bookingUid} for user ${managedUser.email}...`, {
-      newStartTime: rescheduleRequest.start,
-      reschedulingReason: rescheduleRequest.reschedulingReason,
-      rescheduledBy: rescheduleRequest.rescheduledBy,
-      seatUid: rescheduleRequest.seatUid
-    })
+    console.log(
+      `📅 Rescheduling booking ${bookingUid} for user ${managedUser.email}...`,
+      {
+        newStartTime: rescheduleRequest.start,
+        reschedulingReason: rescheduleRequest.reschedulingReason,
+        rescheduledBy: rescheduleRequest.rescheduledBy,
+        seatUid: rescheduleRequest.seatUid,
+      }
+    );
 
     const response = await fetch(baseUrl, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Authorization': `Bearer ${managedUser.access_token}`,
-        'cal-api-version': '2024-08-13',
-        'Content-Type': 'application/json'
+        Authorization: `Bearer ${managedUser.access_token}`,
+        "cal-api-version": "2024-08-13",
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(rescheduleRequest)
-    })
+      body: JSON.stringify(rescheduleRequest),
+    });
 
-    const result: RescheduleBookingResponse = await response.json()
+    const result: RescheduleBookingResponse = await response.json();
 
     if (!response.ok) {
-      console.error(`❌ Cal.com API error for user ${managedUser.email}:`, response.status, response.statusText)
+      console.error(
+        `❌ Cal.com API error for user ${managedUser.email}:`,
+        response.status,
+        response.statusText
+      );
       return {
-        status: 'error',
+        status: "error",
         error: {
           message: `HTTP ${response.status}: ${response.statusText}`,
-          details: result
-        }
-      }
+          details: result,
+        },
+      };
     }
 
-    if (result.status === 'success') {
-      console.log(`✅ Booking rescheduled successfully for user ${managedUser.email}:`, {
-        bookingId: result.data?.id,
-        newBookingUid: result.data?.uid,
-        title: result.data?.title,
-        newStartTime: result.data?.start,
-        newEndTime: result.data?.end
-      })
-      return result
+    if (result.status === "success") {
+      console.log(
+        `✅ Booking rescheduled successfully for user ${managedUser.email}:`,
+        {
+          bookingId: result.data?.id,
+          newBookingUid: result.data?.uid,
+          title: result.data?.title,
+          newStartTime: result.data?.start,
+          newEndTime: result.data?.end,
+        }
+      );
+      return result;
     } else {
-      console.error('❌ Cal.com API returned error:', result.error)
-      if (
-        result.error instanceof Error &&
-        isTokenExpiredError(response, result.error.message)
-      ) {
-        throw new Error(result.error.message);
+      console.error("❌ Cal.com API returned error:", result.error);
+      if (result.error && isTokenExpiredError(response, result.error.message)) {
+        console.log("Token expired, refreshing token");
+
+        // Attempt to refresh the token
+        const newTokens = await refreshCalComToken(managedUser);
+        if (newTokens) {
+          console.log("Token refreshed successfully, updating database");
+          const updatedUser = await updateManagedUserTokens(
+            managedUser,
+            newTokens
+          );
+          if (updatedUser) {
+            console.log("Database updated, retrying request with new token");
+            // Retry the request with the new token
+            const response = await fetch(baseUrl, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${managedUser.access_token}`,
+                "cal-api-version": "2024-08-13",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(rescheduleRequest),
+            });
+            const result: RescheduleBookingResponse = await response.json();
+
+            if (!response.ok) {
+              console.error(
+                `❌ Cal.com API error for user ${managedUser.email}:`,
+                response.status,
+                response.statusText
+              );
+              return {
+                status: "error",
+                error: {
+                  message: `HTTP ${response.status}: ${response.statusText}`,
+                  details: result,
+                },
+              };
+            }
+
+            if (result.status === "success") {
+              console.log(
+                `✅ Booking rescheduled successfully for user ${managedUser.email}:`,
+                {
+                  bookingId: result.data?.id,
+                  newBookingUid: result.data?.uid,
+                  title: result.data?.title,
+                  newStartTime: result.data?.start,
+                  newEndTime: result.data?.end,
+                }
+              );
+              return result;
+            } else {
+              throw new Error("Token expired");
+            }
+          }
+        }
       }
-      return result
+      return result;
     }
   } catch (error) {
-    console.error(`💥 Error rescheduling Cal.com booking for user ${managedUser.email}:`, error)
+    console.error(
+      `💥 Error rescheduling Cal.com booking for user ${managedUser.email}:`,
+      error
+    );
     return {
-      status: 'error',
+      status: "error",
       error: {
-        message: error instanceof Error ? error.message : 'Unknown error occurred',
-        details: error
-      }
-    }
+        message:
+          error instanceof Error ? error.message : "Unknown error occurred",
+        details: error,
+      },
+    };
   }
 }
 
@@ -519,39 +757,51 @@ export async function rescheduleBookingForClient(
   preferredManagedUserId?: number
 ): Promise<BookingRescheduleSummary> {
   try {
-    console.log(`🎯 Rescheduling booking ${bookingUid} for client ${clientId}...`)
+    console.log(
+      `🎯 Rescheduling booking ${bookingUid} for client ${clientId}...`
+    );
 
     // Get managed users for the client
-    const managedUsers = await getManagedUsersByClientId(clientId)
+    const managedUsers = await getManagedUsersByClientId(clientId);
 
     if (managedUsers.length === 0) {
       return {
         success: false,
-        error: `No managed users found for client ${clientId}`
-      }
+        error: `No managed users found for client ${clientId}`,
+      };
     }
 
     // Select the managed user to use for booking rescheduling
-    let selectedUser: CalManagedUser | undefined
+    let selectedUser: CalManagedUser | undefined;
 
     if (preferredManagedUserId) {
-      selectedUser = managedUsers.find(user => user.id === preferredManagedUserId)
+      selectedUser = managedUsers.find(
+        (user) => user.id === preferredManagedUserId
+      );
       if (!selectedUser) {
-        console.log(`⚠️ Preferred managed user ${preferredManagedUserId} not found, using first available`)
+        console.log(
+          `⚠️ Preferred managed user ${preferredManagedUserId} not found, using first available`
+        );
       }
     }
 
     // If no preferred user or preferred user not found, use the first one
     if (!selectedUser) {
-      selectedUser = managedUsers[0]
+      selectedUser = managedUsers[0];
     }
 
-    console.log(`👤 Using managed user: ${selectedUser.email} (ID: ${selectedUser.id})`)
+    console.log(
+      `👤 Using managed user: ${selectedUser.email} (ID: ${selectedUser.id})`
+    );
 
     // Reschedule the booking
-    const result = await rescheduleCalBookingForUser(selectedUser, bookingUid, rescheduleRequest)
+    const result = await rescheduleCalBookingForUser(
+      selectedUser,
+      bookingUid,
+      rescheduleRequest
+    );
 
-    if (result.status === 'success' && result.data) {
+    if (result.status === "success" && result.data) {
       return {
         success: true,
         bookingId: result.data.id,
@@ -562,19 +812,21 @@ export async function rescheduleBookingForClient(
         newEndTime: result.data.end,
         reschedulingReason: result.data.reschedulingReason,
         rescheduledByEmail: result.data.rescheduledByEmail,
-        wasSeatedBooking: !!rescheduleRequest.seatUid
-      }
+        wasSeatedBooking: !!rescheduleRequest.seatUid,
+      };
     } else {
       return {
         success: false,
-        error: result.error?.message || 'Unknown error occurred during booking rescheduling'
-      }
+        error:
+          result.error?.message ||
+          "Unknown error occurred during booking rescheduling",
+      };
     }
   } catch (error) {
-    console.error('💥 Unexpected error in rescheduleBookingForClient:', error)
+    console.error("💥 Unexpected error in rescheduleBookingForClient:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred'
-    }
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
   }
 }
