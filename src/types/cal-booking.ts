@@ -65,7 +65,7 @@ export interface CalBookingsResponse {
     hasNextPage: boolean;
     hasPreviousPage: boolean;
   };
-  error?: unknown;
+  error?: Error;
 }
 
 export interface SearchCriteria {
