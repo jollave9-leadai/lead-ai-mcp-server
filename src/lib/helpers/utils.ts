@@ -168,7 +168,7 @@ export const getCustomerPipeLineWithFuzzySearch = async (fullName: string) => {
   );
   const { data: customerPipeLines } = await supabase
     .from("customer_pipeline_items_with_customers")
-    .select("id, full_name, pipeline_stage_id");
+    .select("id, full_name, created_by, pipeline_stage_id");
 
   const fuse = new Fuse(customerPipeLines || [], {
     keys: ["full_name"], // fields to search
@@ -177,7 +177,10 @@ export const getCustomerPipeLineWithFuzzySearch = async (fullName: string) => {
   return fuse.search(fullName);
 };
 
-export const getNextPipeLineStage = async (pipelineStageId: string) => {
+export const getNextPipeLineStage = async (
+  pipelineStageId: string,
+  clientId: string
+) => {
   const supabase = createClient(
     process.env.CRM_SUPABASE_URL!,
     process.env.CRM_SUPABASE_ANON_KEY!
@@ -190,9 +193,8 @@ export const getNextPipeLineStage = async (pipelineStageId: string) => {
       ascending: true,
     })
     .eq("is_default", true)
-    .eq("name", "Default Pipeline for LeadAI")
+    .eq("created_by", clientId)
     .single();
-
   const currentIndex = pipeline?.pipeline_stages.findIndex(
     (stage) => stage.id === pipelineStageId
   );

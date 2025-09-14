@@ -28,7 +28,8 @@ const handler = createMcpHandler(
           };
         }
         const nextStage = await getNextPipeLineStage(
-          customerPipeline.item.pipeline_stage_id
+          customerPipeline.item.pipeline_stage_id,
+          customerPipeline.item.created_by
         );
         if (!nextStage) {
           return {
