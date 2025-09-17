@@ -163,8 +163,8 @@ export const initiateCall = async (
 
 export const getCustomerPipeLineWithFuzzySearch = async (fullName: string) => {
   const supabase = createClient(
-    process.env.CRM_SUPABASE_URL!,
-    process.env.CRM_SUPABASE_ANON_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
   const { data: customerPipeLines } = await supabase
     .from("customer_pipeline_items_with_customers")
@@ -182,8 +182,8 @@ export const getNextPipeLineStage = async (
   clientId: string
 ) => {
   const supabase = createClient(
-    process.env.CRM_SUPABASE_URL!,
-    process.env.CRM_SUPABASE_ANON_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
   const { data: pipeline } = await supabase
     .from("pipelines")
@@ -225,8 +225,8 @@ export const moveLeadToNextStage = async (
 
 export const getCustomerInformation = async (fullName: string) => {
   const supabase = createClient(
-    process.env.CRM_SUPABASE_URL!,
-    process.env.CRM_SUPABASE_ANON_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
   const { data: customerPipeLines } = await supabase
     .from("customer_pipeline_items_with_customers")

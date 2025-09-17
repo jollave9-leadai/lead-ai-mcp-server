@@ -1,2 +1,2 @@
 export const BASE_SUPABASE_FUNCTIONS_URL =
-  process.env.CRM_SUPABASE_URL + "functions/v1";
+  process.env.NEXT_PUBLIC_SUPABASE_URL + "functions/v1";
