@@ -997,16 +997,14 @@ const handler = createMcpHandler(
           .union([z.number(), z.string().transform(Number)])
           .describe("The ID of the client to create booking for"),
         timeZone: z.string().describe("Timezone of the user"),
-        eventTypeId: z
+        appointmentId: z
           .number()
           .describe("The appointment type for the booking"),
         startTime: z
           .string()
-          .describe(
-            "Start time in ISO 8601 format with timezone (YYYY-MM-DDTHH:mm:ss.sssZ). Examples: '2024-01-15T10:00:00.000Z', '2024-12-25T14:30:00Z'"
-          ),
-        attendeeName: z.string().describe("Name of the attendee"),
-        attendeeEmail: z.string().email().describe("Email of the attendee"),
+          .describe("Convert data/time to ISO 8601 with the timezone provided"),
+        customerName: z.string().describe("Name of the customer"),
+        customerEmail: z.string().email().describe("Email of the customer"),
         attendeeTimeZone: z
           .string()
           .optional()
@@ -1034,10 +1032,10 @@ const handler = createMcpHandler(
         try {
           const {
             clientId,
-            eventTypeId,
+            appointmentId: eventTypeId,
             startTime,
-            attendeeName,
-            attendeeEmail,
+            customerName: attendeeName,
+            customerEmail: attendeeEmail,
             attendeeTimeZone,
             attendeePhoneNumber,
             description,
@@ -1046,6 +1044,7 @@ const handler = createMcpHandler(
             timeZone,
           } = input;
 
+          console.table(input);
           // Convert and validate clientId
           const numericClientId =
             typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
