@@ -996,9 +996,10 @@ const handler = createMcpHandler(
         clientId: z
           .union([z.number(), z.string().transform(Number)])
           .describe("The ID of the client to create booking for"),
+        timeZone: z.string().describe("Timezone of the user"),
         eventTypeId: z
           .number()
-          .describe("The Cal.com event type ID for the booking"),
+          .describe("The appointment type for the booking"),
         startTime: z
           .string()
           .describe(
@@ -1042,6 +1043,7 @@ const handler = createMcpHandler(
             description,
             language = "en",
             preferredManagedUserId,
+            timeZone,
           } = input;
 
           // Convert and validate clientId
@@ -1062,7 +1064,7 @@ const handler = createMcpHandler(
           // Validate and format startTime to proper ISO 8601 format
           const startTimeValidation = validateISO8601Date(
             startTime,
-            attendeeTimeZone ?? "UTC"
+            timeZone ?? "UTC"
           );
           if (!startTimeValidation.isValid) {
             return {
@@ -1083,7 +1085,7 @@ const handler = createMcpHandler(
           // Get client's timezone if attendeeTimeZone is not provided
           let finalAttendeeTimeZone = attendeeTimeZone;
           if (!finalAttendeeTimeZone) {
-            const clientTimezone = await getClientTimezone(numericClientId);
+            const clientTimezone = timeZone;
             finalAttendeeTimeZone = clientTimezone || "UTC";
             console.log(`Using client timezone: ${finalAttendeeTimeZone}`);
           } else {
