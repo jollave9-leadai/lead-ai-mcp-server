@@ -95,11 +95,12 @@ export async function fetchCalBookingsForUser(
       );
       if (result.error && isTokenExpiredError(response, result.error.message)) {
         console.log("Token expired, refreshing token");
-
+        console.log("managedUser", managedUser);
         // Attempt to refresh the token
         const newTokens = await refreshCalComToken(managedUser);
         if (newTokens) {
           console.log("Token refreshed successfully, updating database");
+          console.log("newTokens", newTokens);
           const updatedUser = await updateManagedUserTokens(
             managedUser,
             newTokens

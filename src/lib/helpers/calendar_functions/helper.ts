@@ -15,7 +15,10 @@ export function formatToISO8601(dateInput: string | Date): string {
 }
 
 // Helper function to validate ISO 8601 date format
-export function validateISO8601Date(dateString: string): {
+export function validateISO8601Date(
+  dateString: string,
+  timeZone: string
+): {
   isValid: boolean;
   date?: Date;
   error?: string;
@@ -32,7 +35,9 @@ export function validateISO8601Date(dateString: string): {
 
     // Check if it's in the future
     const now = new Date();
-    if (date <= now) {
+    const nowInTimezone = new Date(now.toLocaleString("en-US", { timeZone }));
+
+    if (date <= nowInTimezone) {
       return {
         isValid: false,
         error: `Date must be in the future. Provided: ${dateString}, Current: ${now.toISOString()}`,
@@ -262,64 +267,83 @@ export function parseDateRequest(
 /**
  * Check if an error indicates token expiration
  */
-export function isTokenExpiredError(response: Response, errorText?: string): boolean {
+export function isTokenExpiredError(
+  response: Response,
+  errorText?: string
+): boolean {
   return (
-    response.status === 401 || 
+    response.status === 401 ||
     response.status === 498 ||
-    (!!errorText && (
-      errorText.includes('ACCESS_TOKEN_IS_EXPIRED') ||
-      errorText.includes('TokenExpiredException') ||
-      errorText.includes('Unauthorized')
-    ))
-  )
-} 
+    (!!errorText &&
+      (errorText.includes("ACCESS_TOKEN_IS_EXPIRED") ||
+        errorText.includes("TokenExpiredException") ||
+        errorText.includes("Unauthorized")))
+  );
+}
 
 /**
  * Refresh Cal.com managed user access token using refresh token
  */
-export async function refreshCalComToken(managedUser: BaseManagedUser): Promise<{ access_token: string; refresh_token: string } | null> {
+export async function refreshCalComToken(
+  managedUser: BaseManagedUser
+): Promise<{ access_token: string; refresh_token: string } | null> {
   try {
-    console.log('🔄 Attempting to refresh Cal.com managed user token for user:', managedUser.cal_user_id)
-    
+    console.log(
+      "🔄 Attempting to refresh Cal.com managed user token for user:",
+      managedUser.cal_user_id
+    );
+
     // Validate required environment variables
-    if (!process.env.CAL_OAUTH_CLIENT_ID || !process.env.CAL_OAUTH_CLIENT_SECRET) {
-      console.error('❌ Missing required Cal.com OAuth credentials in environment variables')
-      return null
+    if (
+      !process.env.CAL_OAUTH_CLIENT_ID ||
+      !process.env.CAL_OAUTH_CLIENT_SECRET
+    ) {
+      console.error(
+        "❌ Missing required Cal.com OAuth credentials in environment variables"
+      );
+      return null;
     }
-    
+
     // Use the specific managed user refresh endpoint
-    const refreshResponse = await fetch(`https://api.cal.com/v2/oauth/${process.env.CAL_OAUTH_CLIENT_ID}/refresh`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-cal-secret-key': process.env.CAL_OAUTH_CLIENT_SECRET,
-      },
-      body: JSON.stringify({
-        refreshToken: managedUser.refresh_token
-      })
-    })
+    const refreshResponse = await fetch(
+      `https://api.cal.com/v2/oauth/${process.env.CAL_OAUTH_CLIENT_ID}/refresh`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-cal-secret-key": process.env.CAL_OAUTH_CLIENT_SECRET,
+        },
+        body: JSON.stringify({
+          refreshToken: managedUser.refresh_token,
+        }),
+      }
+    );
 
     if (!refreshResponse.ok) {
-      const errorText = await refreshResponse.text()
-      console.error('❌ Managed user token refresh failed:', refreshResponse.status, errorText)
-      return null
+      const errorText = await refreshResponse.text();
+      console.error(
+        "❌ Managed user token refresh failed:",
+        refreshResponse.status,
+        errorText
+      );
+      return null;
     }
 
-    const responseData = await refreshResponse.json()
-    console.log('✅ Managed user token refreshed successfully')
-    
-    if (responseData.status === 'success' && responseData.data) {
+    const responseData = await refreshResponse.json();
+    console.log("✅ Managed user token refreshed successfully");
+
+    if (responseData.status === "success" && responseData.data) {
       return {
         access_token: responseData.data.accessToken,
-        refresh_token: responseData.data.refreshToken
-      }
+        refresh_token: responseData.data.refreshToken,
+      };
     } else {
-      console.error('❌ Unexpected refresh response format:', responseData)
-      return null
+      console.error("❌ Unexpected refresh response format:", responseData);
+      return null;
     }
   } catch (error: unknown) {
-    console.error('❌ Error refreshing managed user token:', error)
-    return null
+    console.error("❌ Error refreshing managed user token:", error);
+    return null;
   }
 }
 
@@ -327,50 +351,62 @@ export async function refreshCalComToken(managedUser: BaseManagedUser): Promise<
  * Update managed user tokens in database
  */
 export async function updateManagedUserTokens(
-  managedUser: BaseManagedUser, 
+  managedUser: BaseManagedUser,
   newTokens: { access_token: string; refresh_token: string }
 ): Promise<BaseManagedUser | null> {
   try {
+    console.log("updating managed user tokens", managedUser, newTokens);
     const supabase = createClient();
     // Use cal_user_id as the primary identifier since it's always available
+    const { data: test, error: testError } = await supabase
+      .schema("lead_dialer")
+      .from("cal_managed_users")
+      .select("*")
+      .eq("cal_user_id", managedUser.cal_user_id)
+      .single();
+    console.log("test", test);
+    console.log("testError", testError);
+    // Use cal_user_id as the primary identifier since it's always available
     const { data: updatedUser, error } = await supabase
-      .schema('lead_dialer')
-      .from('cal_managed_users')
+      .schema("lead_dialer")
+      .from("cal_managed_users")
       .update({
         access_token: newTokens.access_token,
         refresh_token: newTokens.refresh_token,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
-      .eq('cal_user_id', managedUser.cal_user_id)
+      .eq("cal_user_id", managedUser.cal_user_id)
       .select()
-      .single()
+      .single();
 
     if (error) {
-      console.error('❌ Failed to update tokens in database:', error)
-      return null
+      console.error("❌ Failed to update tokens in database:", error);
+      return null;
     }
 
-    console.log('✅ Tokens updated in database')
-    return updatedUser
+    console.log("✅ Tokens updated in database");
+    return updatedUser;
   } catch (error: unknown) {
-    console.error('❌ Error updating tokens in database:', error)
-    return null
+    console.error("❌ Error updating tokens in database:", error);
+    return null;
   }
 }
 
-export async function getManagedUserByClientId(clientId: number): Promise<BaseManagedUser | null> {
+export async function getManagedUserByClientId(
+  clientId: number
+): Promise<BaseManagedUser | null> {
   const supabase = createClient();
   const { data: managedUser, error } = await supabase
-    .schema('lead_dialer')
-    .from('cal_managed_users')
-    .select('*')
-    .eq('client_id', clientId)
-    .single()
+    .schema("lead_dialer")
+    .from("cal_managed_users")
+    .select("*")
+    .eq("client_id", clientId)
+    .single();
 
   if (error) {
-    console.error('❌ Failed to get managed user by client ID:', error)
-    return null
+    console.error("❌ Failed to get managed user by client ID:", error);
+    return null;
   }
 
-  return managedUser
+  return managedUser;
 }

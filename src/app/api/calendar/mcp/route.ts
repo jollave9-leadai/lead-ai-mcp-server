@@ -42,6 +42,7 @@ const handler = createMcpHandler(
           .union([z.number(), z.string().transform(Number)])
           .describe("The ID of the client who owns the booking"),
         bookingUid: z.string().describe("The UID of the booking to reschedule"),
+        timeZone: z.string().describe("Timezone of the user"),
         newStartTime: z
           .string()
           .describe(
@@ -74,6 +75,7 @@ const handler = createMcpHandler(
             rescheduledBy,
             seatUid,
             preferredManagedUserId,
+            timeZone,
           } = input;
 
           // Convert and validate clientId
@@ -92,7 +94,10 @@ const handler = createMcpHandler(
           }
 
           // Validate and format newStartTime to proper ISO 8601 format
-          const newStartTimeValidation = validateISO8601Date(newStartTime);
+          const newStartTimeValidation = validateISO8601Date(
+            newStartTime,
+            timeZone || "UTC"
+          );
           if (!newStartTimeValidation.isValid) {
             return {
               content: [
@@ -370,6 +375,7 @@ const handler = createMcpHandler(
         title: z
           .string()
           .describe("Title or partial title of the booking to reschedule"),
+        timeZone: z.string().describe("Timezone of the user"),
         currentDate: z
           .string()
           .optional()
@@ -399,6 +405,7 @@ const handler = createMcpHandler(
             newStartTime,
             reschedulingReason,
             rescheduledBy,
+            timeZone
           } = input;
 
           // Convert and validate clientId
@@ -417,7 +424,7 @@ const handler = createMcpHandler(
           }
 
           // Validate new start time format
-          if (!validateISO8601Date(newStartTime)) {
+          if (!validateISO8601Date(newStartTime, timeZone || "UTC")) {
             return {
               content: [
                 {
@@ -436,9 +443,9 @@ const handler = createMcpHandler(
           responseText += `- **New Time**: ${newStartTime}\n\n`;
 
           // Get client timezone for better date handling
-          const clientTimezone = await getClientTimezone(numericClientId);
-          const timezone = clientTimezone || "UTC";
-
+          // const clientTimezone = await getClientTimezone(numericClientId);
+          // const timezone = clientTimezone || "UTC";
+          const clientTimezone = timeZone || "UTC";
           console.log(
             `🔍 Finding booking for reschedule: "${title}" on ${
               currentDate || "any date"
@@ -478,10 +485,10 @@ const handler = createMcpHandler(
           responseText += `- **UID**: \`${booking.uid}\`\n`;
           responseText += `- **Current Time**: ${new Date(
             booking.start
-          ).toLocaleString("en-US", { timeZone: timezone })}\n`;
+          ).toLocaleString("en-US", { timeZone: clientTimezone })}\n`;
           responseText += `- **New Time**: ${new Date(
             newStartTime
-          ).toLocaleString("en-US", { timeZone: timezone })}\n\n`;
+          ).toLocaleString("en-US", { timeZone: clientTimezone })}\n\n`;
 
           // Validate the new slot is available
           console.log(`🔍 Validating new slot availability...`);
@@ -531,12 +538,12 @@ const handler = createMcpHandler(
             if (rescheduleResult.newStartTime) {
               responseText += `- **New Start**: ${new Date(
                 rescheduleResult.newStartTime
-              ).toLocaleString("en-US", { timeZone: timezone })}\n`;
+              ).toLocaleString("en-US", { timeZone: clientTimezone })}\n`;
             }
             if (rescheduleResult.newEndTime) {
               responseText += `- **New End**: ${new Date(
                 rescheduleResult.newEndTime
-              ).toLocaleString("en-US", { timeZone: timezone })}\n`;
+              ).toLocaleString("en-US", { timeZone: clientTimezone })}\n`;
             }
             if (reschedulingReason) {
               responseText += `- **Reason**: ${reschedulingReason}\n`;
@@ -680,128 +687,149 @@ const handler = createMcpHandler(
       }
     );
 
-    server.tool(
-      "FormatDateForBooking",
-      "Helper tool to format dates into proper ISO 8601 format required for booking creation and rescheduling.",
-      {
-        dateInput: z
-          .string()
-          .describe(
-            "Date input in various formats (e.g., '2024-01-15 10:00', 'January 15, 2024 10:00 AM', '2024-01-15T10:00:00')"
-          ),
-        timezone: z
-          .string()
-          .optional()
-          .describe(
-            "Timezone to interpret the date in (e.g., 'America/New_York', 'Europe/London'). Defaults to UTC."
-          ),
-      },
-      async (input) => {
-        try {
-          const { dateInput, timezone = "UTC" } = input;
+    // server.tool(
+    //   "FormatDateForBooking",
+    //   "Helper tool to format dates into proper ISO 8601 format required for booking creation and rescheduling.",
+    //   {
+    //     dateInput: z
+    //       .string()
+    //       .describe(
+    //         "Date input in various formats (e.g., '2024-01-15 10:00', 'January 15, 2024 10:00 AM', '2024-01-15T10:00:00')"
+    //       ),
+    //     timezone: z
+    //       .string()
+    //       .optional()
+    //       .describe(
+    //         "Timezone to interpret the date in (e.g., 'America/New_York', 'Europe/London'). Defaults to UTC."
+    //       ),
+    //   },
+    //   async (input) => {
+    //     try {
+    //       const { dateInput, timezone = "UTC" } = input;
 
-          console.log(
-            `🕐 Formatting date: ${dateInput} (timezone: ${timezone})`
-          );
+    //       console.log(
+    //         `🕐 Formatting date: ${dateInput} (timezone: ${timezone})`
+    //       );
 
-          // Try to parse the date
-          let date: Date;
+    //       // Try to parse the date
+    //       let date: Date;
 
-          try {
-            // If timezone is provided and not UTC, we need to handle it carefully
-            if (timezone !== "UTC") {
-              // Create a date assuming the input is in the specified timezone
-              const tempDate = new Date(dateInput);
-              if (isNaN(tempDate.getTime())) {
-                throw new Error("Invalid date format");
-              }
+    //       try {
+    //         // If timezone is provided and not UTC, we need to handle it carefully
+    //         if (timezone !== "UTC") {
+    //           // Create a date assuming the input is in the specified timezone
+    //           const tempDate = new Date(dateInput);
+    //           if (isNaN(tempDate.getTime())) {
+    //             throw new Error("Invalid date format");
+    //           }
 
-              // Convert to the specified timezone
-              const utcTime =
-                tempDate.getTime() + tempDate.getTimezoneOffset() * 60000;
-              date = new Date(utcTime);
-            } else {
-              date = new Date(dateInput);
-            }
+    //           // Convert to the specified timezone
+    //           const utcTime =
+    //             tempDate.getTime() + tempDate.getTimezoneOffset() * 60000;
+    //           date = new Date(utcTime);
+    //         } else {
+    //           date = new Date(dateInput);
+    //         }
 
-            if (isNaN(date.getTime())) {
-              throw new Error("Invalid date format");
-            }
-          } catch (error) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `❌ **Unable to Parse Date**\n\n**Input**: ${dateInput}\n**Error**: ${
-                    error instanceof Error ? error.message : "Unknown error"
-                  }\n\n**Supported Formats**:\n- ISO 8601: '2024-01-15T10:00:00Z'\n- Date string: 'January 15, 2024 10:00 AM'\n- Simple format: '2024-01-15 10:00'\n- Unix timestamp: 1705312800000`,
-                },
-              ],
-            };
-          }
+    //         if (isNaN(date.getTime())) {
+    //           throw new Error("Invalid date format");
+    //         }
+    //       } catch (error) {
+    //         return {
+    //           content: [
+    //             {
+    //               type: "text",
+    //               text: `❌ **Unable to Parse Date**\n\n**Input**: ${dateInput}\n**Error**: ${
+    //                 error instanceof Error ? error.message : "Unknown error"
+    //               }\n\n**Supported Formats**:\n- ISO 8601: '2024-01-15T10:00:00Z'\n- Date string: 'January 15, 2024 10:00 AM'\n- Simple format: '2024-01-15 10:00'\n- Unix timestamp: 1705312800000`,
+    //             },
+    //           ],
+    //         };
+    //       }
 
-          // Format to proper ISO 8601
-          const formattedDate = formatToISO8601(date);
+    //       // Format to proper ISO 8601
+    //       const formattedDate = formatToISO8601(date);
 
-          // Check if it's in the future
-          const now = new Date();
-          const isInFuture = date > now;
+    //       // Check if it's in the future
+    //       const now = new Date();
+    //       const isInFuture = date > now;
 
-          let responseText = `**📅 Date Formatting Result**\n\n`;
-          responseText += `**Original Input**: ${dateInput}\n`;
-          responseText += `**Timezone**: ${timezone}\n`;
-          responseText += `**Formatted Output**: \`${formattedDate}\`\n\n`;
+    //       let responseText = `**📅 Date Formatting Result**\n\n`;
+    //       responseText += `**Original Input**: ${dateInput}\n`;
+    //       responseText += `**Timezone**: ${timezone}\n`;
+    //       responseText += `**Formatted Output**: \`${formattedDate}\`\n\n`;
 
-          responseText += `**✅ Ready for Booking**: ${
-            isInFuture ? "Yes" : "No"
-          }\n`;
-          if (!isInFuture) {
-            responseText += `**⚠️ Warning**: Date is in the past. Current time: ${now.toISOString()}\n`;
-          }
+    //       responseText += `**✅ Ready for Booking**: ${
+    //         isInFuture ? "Yes" : "No"
+    //       }\n`;
+    //       if (!isInFuture) {
+    //         responseText += `**⚠️ Warning**: Date is in the past. Current time: ${now.toISOString()}\n`;
+    //       }
 
-          responseText += `\n**📋 Usage Examples**:\n`;
-          responseText += `\`\`\`\n`;
-          responseText += `CreateBooking with:\n`;
-          responseText += `- startTime: "${formattedDate}"\n`;
-          responseText += `- eventTypeId: 12345\n`;
-          responseText += `- attendeeName: "John Doe"\n`;
-          responseText += `- attendeeEmail: "john@example.com"\n`;
-          responseText += `\`\`\`\n\n`;
+    //       responseText += `\n**📋 Usage Examples**:\n`;
+    //       responseText += `\`\`\`\n`;
+    //       responseText += `CreateBooking with:\n`;
+    //       responseText += `- startTime: "${formattedDate}"\n`;
+    //       responseText += `- eventTypeId: 12345\n`;
+    //       responseText += `- attendeeName: "John Doe"\n`;
+    //       responseText += `- attendeeEmail: "john@example.com"\n`;
+    //       responseText += `\`\`\`\n\n`;
 
-          responseText += `**🔄 Alternative Formats**:\n`;
-          responseText += `- **Human Readable**: ${date.toLocaleString(
-            "en-US",
-            { timeZone: timezone }
-          )}\n`;
-          responseText += `- **Unix Timestamp**: ${date.getTime()}\n`;
-          responseText += `- **Date Only**: ${
-            date.toISOString().split("T")[0]
-          }\n`;
+    //       responseText += `**🔄 Alternative Formats**:\n`;
+    //       responseText += `- **Human Readable**: ${date.toLocaleString(
+    //         "en-US",
+    //         { timeZone: timezone }
+    //       )}\n`;
+    //       responseText += `- **Unix Timestamp**: ${date.getTime()}\n`;
+    //       responseText += `- **Date Only**: ${
+    //         date.toISOString().split("T")[0]
+    //       }\n`;
 
-          return {
-            content: [
-              {
-                type: "text",
-                text: responseText,
-              },
-            ],
-          };
-        } catch (error) {
-          console.error("Error in FormatDateForBooking:", error);
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error formatting date: ${
-                  error instanceof Error ? error.message : "Unknown error"
-                }`,
-              },
-            ],
-          };
-        }
-      }
-    );
-
+    //       return {
+    //         content: [
+    //           {
+    //             type: "text",
+    //             text: responseText,
+    //           },
+    //         ],
+    //       };
+    //     } catch (error) {
+    //       console.error("Error in FormatDateForBooking:", error);
+    //       return {
+    //         content: [
+    //           {
+    //             type: "text",
+    //             text: `Error formatting date: ${
+    //               error instanceof Error ? error.message : "Unknown error"
+    //             }`,
+    //           },
+    //         ],
+    //       };
+    //     }
+    //   }
+    // );
+    // server.tool(
+    //   "FormatDateTime",
+    //   "Helper tool to format dates into proper ISO 8601 format required for all the calendar functions.",
+    //   {
+    //     timeZone: z.string().describe("Timezone of the user"),
+    //     userInputtedDateTime: z
+    //       .string()
+    //       .describe(
+    //         "Convert user inputted string to date/time ISO 8601 format with the timezone provided"
+    //       ),
+    //   },
+    //   async ({ userInputtedDateTime, timeZone }) => {
+    //     return {
+    //       content: [
+    //         {
+    //           type: "text",
+    //           text: `Formatted datetime: ${userInputtedDateTime} with timezone ${timeZone}`,
+    //         },
+    //       ],
+    //     };
+    //   }
+    // );
     server.tool(
       "GetAvailableSlots",
       "Get available time slots for an event type before creating a booking. Most common usage: provide clientId, start, end, and eventTypeId. Other parameters are optional for advanced use cases.",
@@ -809,16 +837,23 @@ const handler = createMcpHandler(
         clientId: z
           .union([z.number(), z.string().transform(Number)])
           .describe("The ID of the client to get slots for"),
+        timeZone: z.string().describe("Timezone of the user"),
+        // start: z
+        //   .string()
+        //   .describe(
+        //     "Start date/time in ISO 8601 format (UTC). Can be date only (2024-08-13) or with time (2024-08-13T09:00:00Z)"
+        //   ),
+        // end: z
+        //   .string()
+        //   .describe(
+        //     "End date/time in ISO 8601 format (UTC). Can be date only (2024-08-20) or with time (2024-08-20T18:00:00Z)"
+        //   ),
         start: z
           .string()
-          .describe(
-            "Start date/time in ISO 8601 format (UTC). Can be date only (2024-08-13) or with time (2024-08-13T09:00:00Z)"
-          ),
+          .describe("Convert data/time to ISO 8601 with the timezone provided"),
         end: z
           .string()
-          .describe(
-            "End date/time in ISO 8601 format (UTC). Can be date only (2024-08-20) or with time (2024-08-20T18:00:00Z)"
-          ),
+          .describe("Convert data/time to ISO 8601 with the timezone provided"),
 
         // Event type identification (most common: use eventTypeId)
         eventTypeId: z
@@ -863,10 +898,6 @@ const handler = createMcpHandler(
           ),
 
         // Optional parameters
-        timeZone: z
-          .string()
-          .optional()
-          .describe("Timezone for returned slots (defaults to UTC)"),
         duration: z
           .number()
           .optional()
@@ -919,8 +950,8 @@ const handler = createMcpHandler(
           }
 
           // Validate date inputs
-          const startValidation = validateISO8601Date(start);
-          const endValidation = validateISO8601Date(end);
+          const startValidation = validateISO8601Date(start, timeZone);
+          const endValidation = validateISO8601Date(end, timeZone);
 
           if (!startValidation.isValid) {
             return {
@@ -985,8 +1016,10 @@ const handler = createMcpHandler(
 
           // Build slots request (most common: start, end, eventTypeId)
           const slotsRequest: GetSlotsRequest = {
-            start: formatToISO8601(start),
-            end: formatToISO8601(end),
+            // start: formatToISO8601(start),
+            // end: formatToISO8601(end),
+            start,
+            end,
             eventTypeId,
           };
 
@@ -1132,7 +1165,10 @@ const handler = createMcpHandler(
           }
 
           // Validate and format startTime to proper ISO 8601 format
-          const startTimeValidation = validateISO8601Date(startTime);
+          const startTimeValidation = validateISO8601Date(
+            startTime,
+            attendeeTimeZone ?? "UTC"
+          );
           if (!startTimeValidation.isValid) {
             return {
               content: [
@@ -1346,6 +1382,7 @@ const handler = createMcpHandler(
         clientId: z
           .union([z.number(), z.string().transform(Number)])
           .describe("The ID of the client to get events for"),
+        timeZone: z.string().describe("Timezone of the user"),
         dateRequest: z
           .string()
           .optional()
@@ -1355,7 +1392,7 @@ const handler = createMcpHandler(
       },
       async (input) => {
         try {
-          const { clientId, dateRequest = "today" } = input;
+          const { clientId, dateRequest = "today", timeZone } = input;
 
           // Convert and validate clientId
           const numericClientId =
@@ -1373,12 +1410,13 @@ const handler = createMcpHandler(
           }
 
           // Get client's timezone
-          const clientTimezone = await getClientTimezone(numericClientId);
-          const timezone = clientTimezone || "UTC";
+          // const clientTimezone = await getClientTimezone(numericClientId);
+          console.log("clientTimezone", timeZone);
+          const timezone = timeZone || "UTC";
 
           // Parse the date request
           const dateRange = parseDateRequest(dateRequest, timezone);
-
+          console.log("dateRange", dateRange);
           console.log(`📅 Parsed date request "${dateRequest}" to:`, {
             description: dateRange.description,
             start: dateRange.start,
@@ -1392,13 +1430,13 @@ const handler = createMcpHandler(
             beforeEnd: dateRange.end,
             // eventTypeIds will be automatically fetched by getCalendarEvents function
           });
-
+          console.log("events", events);
           // Format events as readable string
           const formattedEvents = formatCalendarEventsAsString(
             events,
             timezone
           );
-
+          console.log("formattedEvents", formattedEvents);
           return {
             content: [
               {
@@ -1503,7 +1541,10 @@ const handler = createMcpHandler(
           }
 
           // Validate requested slot
-          const slotValidation = validateISO8601Date(requestedSlot);
+          const slotValidation = validateISO8601Date(
+            requestedSlot,
+            timeZone || "UTC"
+          );
           if (!slotValidation.isValid) {
             return {
               content: [
@@ -1872,7 +1913,10 @@ const handler = createMcpHandler(
             };
           }
           const result = await refreshCalComToken(managedUser);
-          await updateManagedUserTokens(managedUser, { access_token: result?.access_token || "", refresh_token: result?.refresh_token || "" });
+          await updateManagedUserTokens(managedUser, {
+            access_token: result?.access_token || "",
+            refresh_token: result?.refresh_token || "",
+          });
           return {
             content: [
               {
@@ -1894,6 +1938,31 @@ const handler = createMcpHandler(
         }
       }
     );
+    // server.tool("manual-db-execute", "Query the database", {}, async () => {
+    //   const supabase = createClient();
+    //   const { data: updatedUser, error: updateError } = await supabase
+    //     .schema("lead_dialer")
+    //     .from("cal_managed_users")
+    //     // .select()
+    //     .update({
+    //       access_token:
+    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoiYWNjZXNzX3Rva2VuIiwiY2xpZW50SWQiOiJjbWN0dXJndW8wMDY4cWcxcjhia21seDZvIiwib3duZXJJZCI6MTc3MDkxNywiZXhwaXJlc0F0IjoxNzU4MTY2NTYwMDAwLCJ1c2VySWQiOjE3NzA5MTcsImp0aSI6IjZhMGRlMzRkLWUzMjYtNDgzNC04ZDYyLWE1MmNkNjNjZDU4OCIsImlhdCI6MTc1ODE2Mjk2MH0.E7tsSic_qerunBrX_RKm_y0q8cluAobxSgWqXWwr14c",
+    //       refresh_token:
+    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoicmVmcmVzaF90b2tlbiIsImNsaWVudElkIjoiY21jdHVyZ3VvMDA2OHFnMXI4YmttbHg2byIsIm93bmVySWQiOjE3NzA5MTcsImV4cGlyZXNBdCI6MTc4OTY4OTYwMDAwMCwidXNlcklkIjoxNzcwOTE3LCJqdGkiOiI4MjFjMjFjNi01YTdiLTRlZWMtODBjMS1mMjEyZDExYjQ3MTEiLCJpYXQiOjE3NTgxNjI5NjB9.FNkhP3kILCDG4aOk59VyLcNdqlDWMy6ar7qixNc5czM",
+    //       updated_at: new Date().toISOString(),
+    //     })
+    //     .eq("cal_user_id", 1770917)
+    //     .select()
+    //     .single();
+    //   return {
+    //     content: [
+    //       {
+    //         type: "text",
+    //         text: `Result: ${JSON.stringify(updatedUser)}`,
+    //       },
+    //     ],
+    //   };
+    // });
   },
   {},
   { basePath: "/api/calendar" }

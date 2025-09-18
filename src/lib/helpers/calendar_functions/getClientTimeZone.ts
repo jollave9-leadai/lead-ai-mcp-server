@@ -16,7 +16,8 @@ export async function getClientTimezone(clientId: number): Promise<string | null
       .select('timezone')
       .eq('id', clientId)
       .single()
-
+      
+    console.log("getClientTimezone data", data);
     if (error) {
       console.error('Error fetching client timezone:', error)
       return null
