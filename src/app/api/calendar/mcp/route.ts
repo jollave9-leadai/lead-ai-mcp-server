@@ -47,9 +47,7 @@ const handler = createMcpHandler(
         timeZone: z.string().describe("Timezone of the user"),
         newStartTime: z
           .string()
-          .describe(
-            "New start time in ISO 8601 format with timezone (YYYY-MM-DDTHH:mm:ss.sssZ). Examples: '2024-01-15T14:00:00.000Z', '2024-12-25T16:30:00Z'"
-          ),
+          .describe("Convert data/time to ISO 8601 with the timezone provided"),
         reschedulingReason: z
           .string()
           .optional()
@@ -79,7 +77,8 @@ const handler = createMcpHandler(
             preferredManagedUserId,
             timeZone,
           } = input;
-
+          console.log("reschedule booking");
+          console.table(input);
           // Convert and validate clientId
           const numericClientId =
             typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
@@ -252,7 +251,8 @@ const handler = createMcpHandler(
             status,
             timeZone,
           } = input;
-
+          console.log("search bookings");
+          console.table(input);
           // Convert and validate clientId
           const numericClientId =
             typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
@@ -423,9 +423,7 @@ const handler = createMcpHandler(
           ),
         newStartTime: z
           .string()
-          .describe(
-            "New start time in ISO 8601 format with timezone (YYYY-MM-DDTHH:mm:ss.sssZ)"
-          ),
+          .describe("Convert data/time to ISO 8601 with the timezone provided"),
         reschedulingReason: z
           .string()
           .optional()
@@ -446,7 +444,8 @@ const handler = createMcpHandler(
             rescheduledBy,
             timeZone,
           } = input;
-
+          console.log("reschedule booking by title");
+          console.table(input);
           // Convert and validate clientId
           const numericClientId =
             typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
@@ -828,7 +827,8 @@ const handler = createMcpHandler(
             timeZone,
             preferredManagedUserId,
           } = input;
-
+          console.log("get available slots");
+          console.table(input);
           // Convert and validate clientId
           const numericClientId =
             typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
@@ -1043,7 +1043,7 @@ const handler = createMcpHandler(
             preferredManagedUserId,
             timeZone,
           } = input;
-
+          console.log("create booking");
           console.table(input);
           // Convert and validate clientId
           const numericClientId =
@@ -1289,7 +1289,8 @@ const handler = createMcpHandler(
       async (input) => {
         try {
           const { clientId, dateRequest = "today", timeZone } = input;
-
+          console.log("get calendar events");
+          console.table(input);
           // Convert and validate clientId
           const numericClientId =
             typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
@@ -1365,17 +1366,16 @@ const handler = createMcpHandler(
         clientId: z
           .union([z.number(), z.string().transform(Number)])
           .describe("The ID of the client to validate slots for"),
+        timeZone: z.string().describe("Timezone of the user"),
         requestedSlot: z
           .string()
-          .describe(
-            "The requested slot time in ISO 8601 format (e.g., '2024-01-15T10:00:00.000Z')"
-          ),
+          .describe("Convert data/time to ISO 8601 with the timezone provided"),
         start: z
           .string()
-          .describe("Start date for slot search range in ISO 8601 format"),
+          .describe("Convert data/time to ISO 8601 with the timezone provided"),
         end: z
           .string()
-          .describe("End date for slot search range in ISO 8601 format"),
+          .describe("Convert data/time to ISO 8601 with the timezone provided"),
 
         // Event type identification (most common: use eventTypeId)
         eventTypeId: z
@@ -1399,10 +1399,6 @@ const handler = createMcpHandler(
         teamSlug: z.string().optional().describe("Team slug for team events"),
 
         // Optional parameters
-        timeZone: z
-          .string()
-          .optional()
-          .describe("Timezone for validation (defaults to UTC)"),
         duration: z.number().optional().describe("Duration in minutes"),
         preferredManagedUserId: z
           .number()
@@ -1420,7 +1416,8 @@ const handler = createMcpHandler(
             timeZone,
             preferredManagedUserId,
           } = input;
-
+          console.log("validate slot availability");
+          console.table(input);
           // Convert and validate clientId
           const numericClientId =
             typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
@@ -1458,8 +1455,10 @@ const handler = createMcpHandler(
 
           // Build slots request (most common: start, end, eventTypeId)
           const slotsRequest: GetSlotsRequest = {
-            start: formatToISO8601(start),
-            end: formatToISO8601(end),
+            // start: formatToISO8601(start),
+            // end: formatToISO8601(end),
+            start,
+            end,
             eventTypeId,
           };
 
