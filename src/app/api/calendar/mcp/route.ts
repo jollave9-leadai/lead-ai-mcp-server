@@ -12,6 +12,7 @@ import {
   GetSlotsRequest,
   CreateBookingRequest,
   SearchCriteria,
+  CancelBookingRequest,
 } from "@/types";
 import {
   getClientTimezone,
@@ -30,6 +31,7 @@ import {
   formatCalendarEventsAsString,
   parseDateRequest,
   validateSlotAvailability,
+  cancelBookingForClient,
 } from "@/lib/helpers/calendar_functions";
 
 const handler = createMcpHandler(
@@ -405,7 +407,7 @@ const handler = createMcpHandler(
             newStartTime,
             reschedulingReason,
             rescheduledBy,
-            timeZone
+            timeZone,
           } = input;
 
           // Convert and validate clientId
@@ -1963,6 +1965,139 @@ const handler = createMcpHandler(
     //     ],
     //   };
     // });
+    server.tool(
+      "CancelBooking",
+      "Cancel an existing booking using Cal.com API. Supports both regular bookings and seated bookings.",
+
+      {
+        clientId: z
+          .union([z.number(), z.string().transform(Number)])
+          .describe("The ID of the client who owns the booking"),
+        bookingUid: z.string().describe("The UID of the booking to cancel"),
+        cancellationReason: z
+          .string()
+          .describe("Reason for canceling the booking"),
+        cancelSubsequentBookings: z
+          .boolean()
+          .optional()
+          .describe(
+            "Whether to cancel subsequent recurring bookings (default: false)"
+          ),
+        seatUid: z
+          .string()
+          .optional()
+          .describe("For seated bookings: the specific seat UID to cancel"),
+        preferredManagedUserId: z
+          .number()
+          .optional()
+          .describe("Preferred managed user ID to use for cancellation"),
+      },
+      async (input) => {
+        try {
+          const {
+            clientId,
+            bookingUid,
+            cancellationReason,
+            cancelSubsequentBookings = false,
+            seatUid,
+            preferredManagedUserId,
+          } = input;
+
+          // Convert and validate clientId
+          const numericClientId =
+            typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+
+          if (!numericClientId || isNaN(numericClientId)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "Error: clientId is required and must be a valid number",
+                },
+              ],
+            };
+          }
+
+          // Create cancellation request object
+          const cancelRequest: CancelBookingRequest = {
+            cancellationReason,
+            cancelSubsequentBookings,
+            ...(seatUid && { seatUid }),
+          };
+
+          console.log(`Canceling booking for client ${numericClientId}:`, {
+            bookingUid,
+            cancellationReason,
+            cancelSubsequentBookings,
+            seatUid,
+            preferredManagedUserId,
+          });
+
+          // Cancel the booking
+          const result = await cancelBookingForClient(
+            numericClientId,
+            bookingUid,
+            cancelRequest,
+            preferredManagedUserId
+          );
+
+          if (result.success) {
+            let responseText = `**Booking Canceled Successfully!**\n\n`;
+            responseText += `**Cancellation Details:**\n`;
+            responseText += `- **Booking ID**: ${result.bookingId}\n`;
+            responseText += `- **Booking UID**: ${result.bookingUid}\n`;
+            responseText += `- **Event Title**: ${result.eventTitle}\n`;
+            responseText += `- **Cancellation Reason**: ${result.cancellationReason}\n`;
+            responseText += `- **Cancelled By**: ${result.cancelledByEmail}\n`;
+            responseText += `- **Client ID**: ${numericClientId}\n`;
+
+            if (result.wasSeatedBooking) {
+              responseText += `- **Booking Type**: Seated Booking (specific seat canceled)\n`;
+            } else {
+              responseText += `- **Booking Type**: Regular Booking\n`;
+            }
+
+            if (cancelSubsequentBookings) {
+              responseText += `- **Subsequent Bookings**: Also canceled\n`;
+            }
+
+            if (preferredManagedUserId) {
+              responseText += `- **Managed User ID**: ${preferredManagedUserId}\n`;
+            }
+
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: responseText,
+                },
+              ],
+            };
+          } else {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `❌ **Booking Cancellation Failed**\n\n**Error**: ${result.error}\n\n**Client ID**: ${numericClientId}\n**Booking UID**: ${bookingUid}\n**Cancellation Reason**: ${cancellationReason}`,
+                },
+              ],
+            };
+          }
+        } catch (error) {
+          console.error("❌ Error in CancelBooking:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ Error canceling booking: ${
+                  error instanceof Error ? error.message : "Unknown error"
+                }`,
+              },
+            ],
+          };
+        }
+      }
+    );
   },
   {},
   { basePath: "/api/calendar" }
