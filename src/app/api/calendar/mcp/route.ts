@@ -212,6 +212,7 @@ const handler = createMcpHandler(
         clientId: z
           .union([z.number(), z.string().transform(Number)])
           .describe("The ID of the client to search bookings for"),
+        timeZone: z.string().describe("Timezone of the user"),
         title: z
           .string()
           .optional()
@@ -242,8 +243,15 @@ const handler = createMcpHandler(
       },
       async (input) => {
         try {
-          const { clientId, title, attendeeEmail, date, dateRange, status } =
-            input;
+          const {
+            clientId,
+            title,
+            attendeeEmail,
+            date,
+            dateRange,
+            status,
+            timeZone,
+          } = input;
 
           // Convert and validate clientId
           const numericClientId =
@@ -312,15 +320,44 @@ const handler = createMcpHandler(
             responseText += `✅ **Found ${matchingBookings.length} matching booking(s):**\n\n`;
 
             matchingBookings.forEach((booking, index) => {
-              const startDate = new Date(booking.start);
-              const endDate = new Date(booking.end);
+              // const startDate = new Date(booking.start);
+              // const endDate = new Date(booking.end);
+              const startDate = new Date(booking.start).toLocaleDateString(
+                "en-US",
+                {
+                  timeZone,
+                  year: "numeric",
+                  month: "2-digit",
+                  day: "2-digit",
+                }
+              );
+              const timeStart = new Date(booking.start).toLocaleDateString(
+                "en-US",
+                {
+                  timeZone,
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                  hour12: true,
+                }
+              );
+              const timeEnd = new Date(booking.end).toLocaleDateString(
+                "en-US",
+                {
+                  timeZone,
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                  hour12: true,
+                }
+              );
 
               responseText += `**${index + 1}. ${
                 booking.title || "Untitled Booking"
               }**\n`;
               responseText += `   - **UID**: \`${booking.uid}\`\n`;
-              responseText += `   - **Date**: ${startDate.toLocaleDateString()}\n`;
-              responseText += `   - **Time**: ${startDate.toLocaleTimeString()} - ${endDate.toLocaleTimeString()}\n`;
+              responseText += `   - **Date**: ${startDate}\n`;
+              responseText += `   - **Time**: ${timeStart} - ${timeEnd}\n`;
               responseText += `   - **Status**: ${
                 booking.status || "Unknown"
               }\n`;
@@ -688,150 +725,6 @@ const handler = createMcpHandler(
         }
       }
     );
-
-    // server.tool(
-    //   "FormatDateForBooking",
-    //   "Helper tool to format dates into proper ISO 8601 format required for booking creation and rescheduling.",
-    //   {
-    //     dateInput: z
-    //       .string()
-    //       .describe(
-    //         "Date input in various formats (e.g., '2024-01-15 10:00', 'January 15, 2024 10:00 AM', '2024-01-15T10:00:00')"
-    //       ),
-    //     timezone: z
-    //       .string()
-    //       .optional()
-    //       .describe(
-    //         "Timezone to interpret the date in (e.g., 'America/New_York', 'Europe/London'). Defaults to UTC."
-    //       ),
-    //   },
-    //   async (input) => {
-    //     try {
-    //       const { dateInput, timezone = "UTC" } = input;
-
-    //       console.log(
-    //         `🕐 Formatting date: ${dateInput} (timezone: ${timezone})`
-    //       );
-
-    //       // Try to parse the date
-    //       let date: Date;
-
-    //       try {
-    //         // If timezone is provided and not UTC, we need to handle it carefully
-    //         if (timezone !== "UTC") {
-    //           // Create a date assuming the input is in the specified timezone
-    //           const tempDate = new Date(dateInput);
-    //           if (isNaN(tempDate.getTime())) {
-    //             throw new Error("Invalid date format");
-    //           }
-
-    //           // Convert to the specified timezone
-    //           const utcTime =
-    //             tempDate.getTime() + tempDate.getTimezoneOffset() * 60000;
-    //           date = new Date(utcTime);
-    //         } else {
-    //           date = new Date(dateInput);
-    //         }
-
-    //         if (isNaN(date.getTime())) {
-    //           throw new Error("Invalid date format");
-    //         }
-    //       } catch (error) {
-    //         return {
-    //           content: [
-    //             {
-    //               type: "text",
-    //               text: `❌ **Unable to Parse Date**\n\n**Input**: ${dateInput}\n**Error**: ${
-    //                 error instanceof Error ? error.message : "Unknown error"
-    //               }\n\n**Supported Formats**:\n- ISO 8601: '2024-01-15T10:00:00Z'\n- Date string: 'January 15, 2024 10:00 AM'\n- Simple format: '2024-01-15 10:00'\n- Unix timestamp: 1705312800000`,
-    //             },
-    //           ],
-    //         };
-    //       }
-
-    //       // Format to proper ISO 8601
-    //       const formattedDate = formatToISO8601(date);
-
-    //       // Check if it's in the future
-    //       const now = new Date();
-    //       const isInFuture = date > now;
-
-    //       let responseText = `**📅 Date Formatting Result**\n\n`;
-    //       responseText += `**Original Input**: ${dateInput}\n`;
-    //       responseText += `**Timezone**: ${timezone}\n`;
-    //       responseText += `**Formatted Output**: \`${formattedDate}\`\n\n`;
-
-    //       responseText += `**✅ Ready for Booking**: ${
-    //         isInFuture ? "Yes" : "No"
-    //       }\n`;
-    //       if (!isInFuture) {
-    //         responseText += `**⚠️ Warning**: Date is in the past. Current time: ${now.toISOString()}\n`;
-    //       }
-
-    //       responseText += `\n**📋 Usage Examples**:\n`;
-    //       responseText += `\`\`\`\n`;
-    //       responseText += `CreateBooking with:\n`;
-    //       responseText += `- startTime: "${formattedDate}"\n`;
-    //       responseText += `- eventTypeId: 12345\n`;
-    //       responseText += `- attendeeName: "John Doe"\n`;
-    //       responseText += `- attendeeEmail: "john@example.com"\n`;
-    //       responseText += `\`\`\`\n\n`;
-
-    //       responseText += `**🔄 Alternative Formats**:\n`;
-    //       responseText += `- **Human Readable**: ${date.toLocaleString(
-    //         "en-US",
-    //         { timeZone: timezone }
-    //       )}\n`;
-    //       responseText += `- **Unix Timestamp**: ${date.getTime()}\n`;
-    //       responseText += `- **Date Only**: ${
-    //         date.toISOString().split("T")[0]
-    //       }\n`;
-
-    //       return {
-    //         content: [
-    //           {
-    //             type: "text",
-    //             text: responseText,
-    //           },
-    //         ],
-    //       };
-    //     } catch (error) {
-    //       console.error("Error in FormatDateForBooking:", error);
-    //       return {
-    //         content: [
-    //           {
-    //             type: "text",
-    //             text: `Error formatting date: ${
-    //               error instanceof Error ? error.message : "Unknown error"
-    //             }`,
-    //           },
-    //         ],
-    //       };
-    //     }
-    //   }
-    // );
-    // server.tool(
-    //   "FormatDateTime",
-    //   "Helper tool to format dates into proper ISO 8601 format required for all the calendar functions.",
-    //   {
-    //     timeZone: z.string().describe("Timezone of the user"),
-    //     userInputtedDateTime: z
-    //       .string()
-    //       .describe(
-    //         "Convert user inputted string to date/time ISO 8601 format with the timezone provided"
-    //       ),
-    //   },
-    //   async ({ userInputtedDateTime, timeZone }) => {
-    //     return {
-    //       content: [
-    //         {
-    //           type: "text",
-    //           text: `Formatted datetime: ${userInputtedDateTime} with timezone ${timeZone}`,
-    //         },
-    //       ],
-    //     };
-    //   }
-    // );
     server.tool(
       "GetAvailableSlots",
       "Get available time slots for an event type before creating a booking. Most common usage: provide clientId, start, end, and eventTypeId. Other parameters are optional for advanced use cases.",
@@ -1940,31 +1833,6 @@ const handler = createMcpHandler(
         }
       }
     );
-    // server.tool("manual-db-execute", "Query the database", {}, async () => {
-    //   const supabase = createClient();
-    //   const { data: updatedUser, error: updateError } = await supabase
-    //     .schema("lead_dialer")
-    //     .from("cal_managed_users")
-    //     // .select()
-    //     .update({
-    //       access_token:
-    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoiYWNjZXNzX3Rva2VuIiwiY2xpZW50SWQiOiJjbWN0dXJndW8wMDY4cWcxcjhia21seDZvIiwib3duZXJJZCI6MTc3MDkxNywiZXhwaXJlc0F0IjoxNzU4MTY2NTYwMDAwLCJ1c2VySWQiOjE3NzA5MTcsImp0aSI6IjZhMGRlMzRkLWUzMjYtNDgzNC04ZDYyLWE1MmNkNjNjZDU4OCIsImlhdCI6MTc1ODE2Mjk2MH0.E7tsSic_qerunBrX_RKm_y0q8cluAobxSgWqXWwr14c",
-    //       refresh_token:
-    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoicmVmcmVzaF90b2tlbiIsImNsaWVudElkIjoiY21jdHVyZ3VvMDA2OHFnMXI4YmttbHg2byIsIm93bmVySWQiOjE3NzA5MTcsImV4cGlyZXNBdCI6MTc4OTY4OTYwMDAwMCwidXNlcklkIjoxNzcwOTE3LCJqdGkiOiI4MjFjMjFjNi01YTdiLTRlZWMtODBjMS1mMjEyZDExYjQ3MTEiLCJpYXQiOjE3NTgxNjI5NjB9.FNkhP3kILCDG4aOk59VyLcNdqlDWMy6ar7qixNc5czM",
-    //       updated_at: new Date().toISOString(),
-    //     })
-    //     .eq("cal_user_id", 1770917)
-    //     .select()
-    //     .single();
-    //   return {
-    //     content: [
-    //       {
-    //         type: "text",
-    //         text: `Result: ${JSON.stringify(updatedUser)}`,
-    //       },
-    //     ],
-    //   };
-    // });
     server.tool(
       "CancelBooking",
       "Cancel an existing booking using Cal.com API. Supports both regular bookings and seated bookings.",
