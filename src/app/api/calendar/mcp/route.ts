@@ -1057,20 +1057,20 @@ const handler = createMcpHandler(
           }
 
           // Validate and format startTime to proper ISO 8601 format
-          const startTimeValidation = validateISO8601Date(
-            startTime,
-            timeZone ?? "UTC"
-          );
-          if (!startTimeValidation.isValid) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `❌ **Invalid Start Time**\n\n**Provided**: ${startTime}\n**Error**: ${startTimeValidation.error}\n\n**Required Format**: ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ)\n**Examples**:\n- 2024-01-15T10:00:00.000Z\n- 2024-01-15T14:30:00Z\n- 2024-12-25T09:15:30.500Z`,
-                },
-              ],
-            };
-          }
+          // const startTimeValidation = validateISO8601Date(
+          //   startTime,
+          //   timeZone ?? "UTC"
+          // );
+          // if (!startTimeValidation.isValid) {
+          //   return {
+          //     content: [
+          //       {
+          //         type: "text",
+          //         text: `❌ **Invalid Start Time**\n\n**Provided**: ${startTime}\n**Error**: ${startTimeValidation.error}\n\n**Required Format**: ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ)\n**Examples**:\n- 2024-01-15T10:00:00.000Z\n- 2024-01-15T14:30:00Z\n- 2024-12-25T09:15:30.500Z`,
+          //       },
+          //     ],
+          //   };
+          // }
 
           // const formattedStartTime = formatToISO8601(startTimeValidation.date!);
           // console.log(
@@ -1428,20 +1428,20 @@ const handler = createMcpHandler(
           }
 
           // Validate requested slot
-          const slotValidation = validateISO8601Date(
-            requestedSlot,
-            timeZone || "UTC"
-          );
-          if (!slotValidation.isValid) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Error: Invalid requested slot - ${slotValidation.error}`,
-                },
-              ],
-            };
-          }
+          // const slotValidation = validateISO8601Date(
+          //   requestedSlot,
+          //   timeZone || "UTC"
+          // );
+          // if (!slotValidation.isValid) {
+          //   return {
+          //     content: [
+          //       {
+          //         type: "text",
+          //         text: `Error: Invalid requested slot - ${slotValidation.error}`,
+          //       },
+          //     ],
+          //   };
+          // }
 
           console.log(
             `🔍 Validating slot availability for client ${numericClientId}: ${requestedSlot}`
