@@ -742,12 +742,8 @@ const handler = createMcpHandler(
         //   .describe(
         //     "End date/time in ISO 8601 format (UTC). Can be date only (2024-08-20) or with time (2024-08-20T18:00:00Z)"
         //   ),
-        start: z
-          .string()
-          .describe("Convert data/time to ISO 8601 with the timezone provided"),
-        end: z
-          .string()
-          .describe("Convert data/time to ISO 8601 with the timezone provided"),
+        start: z.string().describe("Date/time in ISO 8601 format"),
+        end: z.string().describe("Date/time in ISO 8601 format"),
 
         // Event type identification (most common: use eventTypeId)
         eventTypeId: z
@@ -1076,10 +1072,10 @@ const handler = createMcpHandler(
             };
           }
 
-          const formattedStartTime = formatToISO8601(startTimeValidation.date!);
-          console.log(
-            `✅ Start time validated and formatted: ${startTime} → ${formattedStartTime}`
-          );
+          // const formattedStartTime = formatToISO8601(startTimeValidation.date!);
+          // console.log(
+          //   `✅ Start time validated and formatted: ${startTime} → ${formattedStartTime}`
+          // );
 
           // Get client's timezone if attendeeTimeZone is not provided
           let finalAttendeeTimeZone = attendeeTimeZone;
@@ -1091,15 +1087,13 @@ const handler = createMcpHandler(
             console.log(`Using provided timezone: ${finalAttendeeTimeZone}`);
           }
 
-          console.log(
-            `📅 Proceeding directly with booking for: ${formattedStartTime}`
-          );
+          console.log(`📅 Proceeding directly with booking for: ${startTime}`);
 
           // Create booking directly (skipping slot validation as requested)
           // Create booking request object matching Cal.com API format
           const bookingRequest: CreateBookingRequest = {
             eventTypeId,
-            start: formattedStartTime,
+            start: startTime,
             attendee: {
               name: attendeeName,
               email: attendeeEmail,

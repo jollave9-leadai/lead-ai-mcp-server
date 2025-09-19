@@ -33,14 +33,22 @@ export function validateISO8601Date(
       };
     }
 
-    // Check if it's in the future
-    const now = new Date();
-    const nowInTimezone = new Date(now.toLocaleString("en-US", { timeZone }));
+    // Current time in the given timezone
+    const nowInTimezone = new Date(
+      new Date().toLocaleString("en-US", { timeZone })
+    );
 
+    console.log("date", date);
+    console.log("nowInTimezone", nowInTimezone);
+    // Convert both to ISO string with offset for debugging/logging
+    const providedISO = date.toISOString();
+    const currentISO = nowInTimezone.toISOString();
+    
+    // Check if it's in the future
     if (date <= nowInTimezone) {
       return {
         isValid: false,
-        error: `Date must be in the future. Provided: ${dateString}, Current: ${now.toISOString()}`,
+        error: `Date must be in the future. Provided: ${providedISO}, Current: ${currentISO}`,
       };
     }
 
