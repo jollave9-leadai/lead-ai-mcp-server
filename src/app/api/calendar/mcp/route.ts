@@ -841,30 +841,30 @@ const handler = createMcpHandler(
           }
 
           // Validate date inputs
-          const startValidation = validateISO8601Date(start, timeZone);
-          const endValidation = validateISO8601Date(end, timeZone);
+          // const startValidation = validateISO8601Date(start, timeZone);
+          // const endValidation = validateISO8601Date(end, timeZone);
 
-          if (!startValidation.isValid) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Error: Invalid start date - ${startValidation.error}`,
-                },
-              ],
-            };
-          }
+          // if (!startValidation.isValid) {
+          //   return {
+          //     content: [
+          //       {
+          //         type: "text",
+          //         text: `Error: Invalid start date - ${startValidation.error}`,
+          //       },
+          //     ],
+          //   };
+          // }
 
-          if (!endValidation.isValid) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Error: Invalid end date - ${endValidation.error}`,
-                },
-              ],
-            };
-          }
+          // if (!endValidation.isValid) {
+          //   return {
+          //     content: [
+          //       {
+          //         type: "text",
+          //         text: `Error: Invalid end date - ${endValidation.error}`,
+          //       },
+          //     ],
+          //   };
+          // }
 
           // Validate event type identification (eventTypeId is most common and recommended)
           if (!eventTypeId && !eventTypeSlug && !usernames) {
