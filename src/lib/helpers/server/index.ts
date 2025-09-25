@@ -6,11 +6,11 @@ export const createClient = () => {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  console.log('🔧 Supabase Client Debug:');
-  console.log('URL:', supabaseUrl ? 'Set' : 'Missing');
-  console.log('Service Role Key:', serviceRoleKey ? `Set (will bypass RLS) - ${serviceRoleKey.substring(0, 20)}...` : 'Missing');
-  console.log('Anon Key:', anonKey ? `Set (requires RLS policies) - ${anonKey.substring(0, 20)}...` : 'Missing');
-  console.log('Using Key Type:', serviceRoleKey ? 'SERVICE_ROLE' : 'ANON');
+  // console.log('🔧 Supabase Client Debug:');
+  // console.log('URL:', supabaseUrl ? 'Set' : 'Missing');
+  // console.log('Service Role Key:', serviceRoleKey ? `Set (will bypass RLS) - ${serviceRoleKey.substring(0, 20)}...` : 'Missing');
+  // console.log('Anon Key:', anonKey ? `Set (requires RLS policies) - ${anonKey.substring(0, 20)}...` : 'Missing');
+  // console.log('Using Key Type:', serviceRoleKey ? 'SERVICE_ROLE' : 'ANON');
 
   if (!supabaseUrl) {
     throw new Error('NEXT_PUBLIC_SUPABASE_URL is not set in environment variables');
