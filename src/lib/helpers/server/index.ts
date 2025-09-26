@@ -2,9 +2,9 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 // Create a Supabase client for server-side use (Express environment)
 export const createClient = () => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseUrl = process.env.PERSONAL_SUPABASE_URL;
+  const serviceRoleKey = process.env.PERSONAL_SUPABASE_SERVICE_ROLE_KEY;
+  const anonKey = process.env.PERSONAL_SUPABASE_ANON_KEY;
 
   // console.log('🔧 Supabase Client Debug:');
   // console.log('URL:', supabaseUrl ? 'Set' : 'Missing');
