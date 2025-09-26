@@ -39,7 +39,7 @@ const handler = createMcpHandler(
         clientId: z.string(), // Injected from the prompt
       },
       async ({ name, message, clientId }) => {
-        const [customer] = await getCustomerWithFuzzySearch(name);
+        const [customer] = await getCustomerWithFuzzySearch(name, clientId);
         console.log("customer", customer);
         console.log("clientId", clientId);
         if (!customer) {
@@ -75,15 +75,15 @@ const handler = createMcpHandler(
         }
         await initiateCall(
           customer.item.phone_number,
-          message,
           agent,
-          clientId
+          clientId,
+          "Relaying message: " + message
         );
         return {
           content: [
             {
               type: "text",
-              text: `Successfully called ${name}. Call ID: 0`,
+              text: `Successfully called ${name}`,
             },
           ],
         };

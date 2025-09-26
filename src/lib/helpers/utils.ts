@@ -3,7 +3,10 @@ import Fuse from "fuse.js";
 import axios from "axios";
 import { BASE_SUPABASE_FUNCTIONS_URL } from "./constants";
 
-export const getCustomerWithFuzzySearch = async (name: string) => {
+export const getCustomerWithFuzzySearch = async (
+  name: string,
+  clientId: string
+) => {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -11,7 +14,8 @@ export const getCustomerWithFuzzySearch = async (name: string) => {
   const { data: customers } = await supabase
     .schema("lead_dialer")
     .from("customers")
-    .select("full_name, phone_number");
+    .select("full_name, phone_number")
+    .eq("client_id", clientId);
 
   const fuse = new Fuse(customers || [], {
     keys: ["full_name"], // fields to search
@@ -59,9 +63,9 @@ export const getAvailableAgent = async (clientId: string) => {
 
 export const initiateCall = async (
   phone_number: string,
-  message: string,
   agent: { id: string; name: string },
-  client_id: string
+  client_id: string,
+  script?: string
 ) => {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -77,7 +81,7 @@ export const initiateCall = async (
   const phoneCallPayload = {
     assistant: {
       name: agent.name,
-      firstMessage: message,
+      firstMessage: `Hi this is ${agent.name} do you have a moment?`,
       firstMessageMode:
         vapiIntegration?.firstMessageMode || "assistant-speaks-first",
       backgroundSound: vapiIntegration?.backgroundSound || "office",
@@ -111,7 +115,8 @@ export const initiateCall = async (
         messages: [
           {
             role: "system",
-            content: "You are just relaying a message to a customer.",
+            // content: "You are just relaying a message to a customer.",
+            content: script,
           },
         ],
         // tools and toolIds belong in model object
@@ -130,9 +135,9 @@ export const initiateCall = async (
         numWords: 2,
       },
       // Add missing vapi_integration fields at assistant level
-      ...(vapiIntegration?.voicemailDetection && {
-        voicemailDetection: vapiIntegration.voicemailDetection,
-      }),
+      // ...(vapiIntegration?.voicemailDetection && {
+      //   voicemailDetection: vapiIntegration.voicemailDetection,
+      // }),
       ...(vapiIntegration?.messagePlan && {
         messagePlan: vapiIntegration.messagePlan,
       }),
@@ -151,7 +156,6 @@ export const initiateCall = async (
       number: phone_number,
     },
   };
-  // console.log("phoneCallPayload", phoneCallPayload);
   console.log("vapiIntegration", vapiIntegration);
   await axios.post("https://api.vapi.ai/call/phone", phoneCallPayload, {
     headers: {
@@ -249,4 +253,35 @@ export const getCustomerInformation = async (fullName: string) => {
     stage,
     customerPipeline: customerPipeline.item,
   };
+};
+
+export const sendSMS = async (phone_number: string, smsBody: string) => {
+  const telnyxPayload = {
+    // from: vapi.data.phone_number,
+    from: "+61489900690",
+    messaging_profile_id: "400197bf-b007-4314-9f9f-c5cd0b7b67ae",
+    to: phone_number as string,
+    text: smsBody,
+    subject: "From LeadAI!",
+    use_profile_webhooks: true,
+    type: "SMS",
+  };
+  try {
+    const smsResponse = await axios.post(
+      "https://api.telnyx.com/v2/messages",
+      telnyxPayload,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.TELNYX_API_KEY}`,
+        },
+      }
+    );
+    const smsText = await smsResponse.data;
+    console.log("Telnyx SMS response:", smsText);
+    return smsText;
+  } catch (smsError) {
+    console.error("Failed to send Telnyx SMS:", smsError);
+    return null;
+  }
 };
