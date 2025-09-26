@@ -977,6 +977,7 @@ export async function findAvailableSlotsForClient(
       }
     }
 
+    
     if (!connection.is_connected) {
       return {
         success: false,
