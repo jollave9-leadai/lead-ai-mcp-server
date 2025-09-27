@@ -11,12 +11,13 @@ export const getCustomerWithFuzzySearch = async (
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
-  const { data: customers } = await supabase
-    .schema("lead_dialer")
-    .from("customers")
-    .select("full_name, phone_number")
-    .eq("client_id", clientId);
 
+  // TODO: replace created_by with client_id
+  const { data: customers } = await supabase
+    .from("customer_pipeline_items_with_customers")
+    .select("full_name, phone_number")
+    .eq("created_by", clientId);
+  console.log("customers", customers);
   const fuse = new Fuse(customers || [], {
     keys: ["full_name"], // fields to search
     threshold: 0.5, // how fuzzy (0 = exact, 1 = very fuzzy)
