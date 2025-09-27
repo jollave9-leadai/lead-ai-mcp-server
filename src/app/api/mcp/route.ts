@@ -12,10 +12,10 @@ const handler = createMcpHandler(
     server.tool(
       "send-message-to-crm-agent",
       "Send a message to the CRM agent",
-      { message: z.string() },
-      async ({ message }) => {
+      { message: z.string(), clientId: z.string() },
+      async ({ message, clientId }) => {
         const response = await axios.post(process.env.CRM_AGENT_URL!, {
-          message,
+          message: `clientId: ${clientId}\n\n${message}`,
         });
         console.log("response", response);
         return {
