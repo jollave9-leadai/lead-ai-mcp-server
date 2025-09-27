@@ -60,9 +60,9 @@ const handler = createMcpHandler(
     server.tool(
       "customer-information",
       "Get information about a customer",
-      { fullName: z.string() },
-      async ({ fullName }) => {
-        const customerInformation = await getCustomerInformation(fullName);
+      { fullName: z.string(), clientId: z.string() },
+      async ({ fullName, clientId }) => {
+        const customerInformation = await getCustomerInformation(fullName, clientId);
         if (!customerInformation?.customerPipeline?.full_name) {
           return {
             content: [

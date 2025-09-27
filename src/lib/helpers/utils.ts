@@ -227,7 +227,7 @@ export const moveLeadToNextStage = async (
   );
 };
 
-export const getCustomerInformation = async (fullName: string) => {
+export const getCustomerInformation = async (fullName: string, clientId: string) => {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -236,7 +236,8 @@ export const getCustomerInformation = async (fullName: string) => {
     .from("customer_pipeline_items_with_customers")
     .select(
       "full_name,email, company, job_title, customer_status, customer_type, source, address, city, state, postal_code, country, phone_number, pipeline_stage_id"
-    );
+    )
+    .eq("clientId", clientId);
 
   const fuse = new Fuse(customerPipeLines || [], {
     keys: ["full_name"], // fields to search
