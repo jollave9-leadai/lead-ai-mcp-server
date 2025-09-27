@@ -23,7 +23,7 @@ const handler = createMcpHandler(
             {
               type: "text",
               text: `Message sent to CRM agent: ${JSON.stringify(
-                response.data.tool_calls_result
+                response.data.tool_calls_result || response.data.content
               )}`,
             },
           ],
