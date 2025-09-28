@@ -35,6 +35,7 @@ const handler = createMcpHandler(
           customerPipeline.item.pipeline_stage_id,
           customerPipeline.item.created_by
         );
+        console.log("nextStage", nextStage);
         if (!nextStage) {
           return {
             content: [
@@ -50,7 +51,7 @@ const handler = createMcpHandler(
           content: [
             {
               type: "text",
-              text: `${customerPipeline.item.full_name} successfully moved to ${nextStage}`,
+              text: `${customerPipeline.item.full_name} successfully moved to ${nextStage.name}`,
             },
           ],
         };
@@ -62,7 +63,10 @@ const handler = createMcpHandler(
       "Get information about a customer",
       { fullName: z.string(), clientId: z.string() },
       async ({ fullName, clientId }) => {
-        const customerInformation = await getCustomerInformation(fullName, clientId);
+        const customerInformation = await getCustomerInformation(
+          fullName,
+          clientId
+        );
         if (!customerInformation?.customerPipeline?.full_name) {
           return {
             content: [

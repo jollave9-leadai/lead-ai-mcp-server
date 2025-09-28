@@ -193,7 +193,7 @@ export const getNextPipeLineStage = async (
   );
   const { data: pipeline } = await supabase
     .from("pipelines")
-    .select("id, pipeline_stages(id, sort_order)")
+    .select("id, pipeline_stages(id, sort_order, name)")
     .order("sort_order", {
       referencedTable: "pipeline_stages",
       ascending: true,
