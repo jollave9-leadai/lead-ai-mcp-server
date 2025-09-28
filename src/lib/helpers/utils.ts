@@ -110,7 +110,7 @@ export const initiateCall = async (
       model: {
         provider:
           vapiIntegration?.model_configurations?.providers?.name || "openai",
-        model: vapiIntegration?.model_configurations?.model || "gpt-4",
+        model: vapiIntegration?.model_configurations?.model || "gpt-4.1",
         temperature: vapiIntegration?.temperature || 0.2,
         maxTokens: vapiIntegration?.maxToken || 250,
         messages: [
@@ -157,7 +157,8 @@ export const initiateCall = async (
       number: phone_number,
     },
   };
-  console.log("vapiIntegration", vapiIntegration);
+  // console.log("vapiIntegration", vapiIntegration);
+  console.log("phoneCallPayload", JSON.stringify(phoneCallPayload));
   await axios.post("https://api.vapi.ai/call/phone", phoneCallPayload, {
     headers: {
       "Content-Type": "application/json",
