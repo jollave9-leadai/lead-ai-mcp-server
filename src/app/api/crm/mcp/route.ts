@@ -9,6 +9,7 @@ import {
   getAvailableAgent,
   initiateCall,
   sendSMS,
+  sendEmail,
 } from "@/lib/helpers";
 // import { CreateMessageRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 const handler = createMcpHandler(
@@ -233,6 +234,61 @@ const handler = createMcpHandler(
             {
               type: "text",
               text: `Successfully sent SMS to ${name}`,
+            },
+          ],
+        };
+      }
+    );
+
+    server.tool(
+      "email-customer",
+      "Email customer by Name",
+      {
+        name: z.string(),
+        clientId: z.string(), // Injected from the prompt
+        message: z.string(),
+      },
+      async ({ name, clientId, message }) => {
+        const [customer] = await getCustomerWithFuzzySearch(name, clientId);
+        console.log("customer", customer);
+        console.log("clientId", clientId);
+        if (!customer) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No customer found with the name ${name}.`,
+              },
+            ],
+          };
+        }
+        if (!customer.item.email) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Customer's email not found.`,
+              },
+            ],
+          };
+        }
+        const response = await sendEmail(clientId, customer.item.email, message, customer.item.pipeline_stage_id);
+        console.log("response", response);
+        if (!response) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Failed to send Email to ${name}.`,
+              },
+            ],
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Successfully sent Email to ${name}`,
             },
           ],
         };

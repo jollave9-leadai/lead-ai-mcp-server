@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import Fuse from "fuse.js";
 import axios from "axios";
 import { BASE_SUPABASE_FUNCTIONS_URL } from "./constants";
+import { google } from "googleapis";
 
 export const getCustomerWithFuzzySearch = async (
   name: string,
@@ -15,9 +16,9 @@ export const getCustomerWithFuzzySearch = async (
   // TODO: replace created_by with client_id
   const { data: customers } = await supabase
     .from("customer_pipeline_items_with_customers")
-    .select("full_name, phone_number")
+    .select("full_name, phone_number, email, pipeline_stage_id")
     .eq("created_by", clientId);
-  console.log("customers", customers);
+
   const fuse = new Fuse(customers || [], {
     keys: ["full_name"], // fields to search
     threshold: 0.5, // how fuzzy (0 = exact, 1 = very fuzzy)
@@ -296,6 +297,77 @@ export const sendSMS = async (phone_number: string, smsBody: string) => {
     return smsText;
   } catch (smsError) {
     console.error("Failed to send Telnyx SMS:", smsError);
+    return null;
+  }
+};
+
+// Helper: encode email to base64url
+function createEmailRaw(
+  to: string,
+  from: string,
+  subject: string,
+  body: string
+) {
+  const message =
+    `To: ${to}\r\n` +
+    `From: ${from}\r\n` +
+    `Subject: ${subject}\r\n\r\n` +
+    body;
+
+  return Buffer.from(message)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+export const sendEmail = async (
+  client_id: string,
+  email: string,
+  emailBody: string,
+  stage_id: string
+) => {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+  const { data: stage } = await supabase
+    .from("pipeline_stages")
+    .select("agent_settings")
+    .eq("id", stage_id)
+    .single();
+  console.log("stage", stage);
+  const supabasePersonal = createClient(
+    process.env.NEXT_PUBLIC_PERSONAL_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_PERSONAL_SUPABASE_ANON_KEY!
+  );
+  const { data: emailData } = await supabasePersonal
+    .from("emails")
+    .select("access_token, refresh_token, email")
+    .eq("email", stage?.agent_settings?.email_account || "")
+    .eq("client_id", client_id)
+    .single();
+  console.log("emailData", emailData);
+  try {
+    const auth = new google.auth.OAuth2();
+    auth.setCredentials({ access_token: emailData?.access_token || "" });
+
+    const gmail = google.gmail({ version: "v1", auth });
+
+    const rawMessage = createEmailRaw(
+      email,
+      emailData?.email || "",
+      "From LeadAI!",
+      emailBody
+    );
+
+    const response = await gmail.users.messages.send({
+      userId: "me",
+      requestBody: { raw: rawMessage },
+    });
+    console.log("Email response:", response.data);
+    return response.data;
+  } catch (smsError) {
+    console.error("Failed to send Email:", smsError);
     return null;
   }
 };
