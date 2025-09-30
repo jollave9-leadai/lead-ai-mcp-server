@@ -336,6 +336,14 @@ export const sendEmail = async (
     .eq("id", stage_id)
     .single();
   console.log("stage", stage);
+  console.log(
+    "process.env.NEXT_PUBLIC_PERSONAL_SUPABASE_URL",
+    process.env.NEXT_PUBLIC_PERSONAL_SUPABASE_URL
+  );
+  console.log(
+    "process.env.NEXT_PUBLIC_PERSONAL_SUPABASE_ANON_KEY",
+    process.env.NEXT_PUBLIC_PERSONAL_SUPABASE_ANON_KEY
+  );
   const supabasePersonal = createClient(
     process.env.NEXT_PUBLIC_PERSONAL_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_PERSONAL_SUPABASE_ANON_KEY!
