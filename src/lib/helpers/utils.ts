@@ -286,25 +286,26 @@ export const getSuccessCriteriaByPhoneNumber = async (
   );
 
   // TODO: replace created_by with client_id
-  const { data: customerPipeLines } = await supabase
+  const { data: customer } = await supabase
     .from("customer_pipeline_items_with_customers")
-    .select("pipeline_stage_id")
+    .select("full_name, pipeline_stage_id")
     .eq("phone_number", phoneNumber)
     .eq("created_by", clientId)
     .single();
 
   console.log("clientId", clientId);
-  console.log("customerPipeLines", customerPipeLines);
+  console.log("customer", customer);
 
   const { data: stage } = await supabase
     .from("pipeline_stages")
     .select("success_criteria")
-    .eq("id", customerPipeLines?.pipeline_stage_id)
+    .eq("id", customer?.pipeline_stage_id)
     .single();
   console.log("stage", stage);
   const successCriteria = stage?.success_criteria;
   console.log("successCriteria", successCriteria);
-  return successCriteria;
+  console.log("full_name", customer?.full_name);
+  return { successCriteria, full_name: customer?.full_name };
 };
 
 export const sendSMS = async (phone_number: string, smsBody: string) => {

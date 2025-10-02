@@ -310,11 +310,11 @@ const handler = createMcpHandler(
       },
       async ({ phoneNumber, clientId }) => {
         console.log("Getting success criteria");
-        const successCriteria = await getSuccessCriteriaByPhoneNumber(
+        console.log("clientId", clientId);
+        const { successCriteria, full_name } = await getSuccessCriteriaByPhoneNumber(
           phoneNumber,
           clientId
         );
-        console.log("clientId", clientId);
         if (!successCriteria) {
           return {
             content: [
@@ -329,7 +329,7 @@ const handler = createMcpHandler(
           content: [
             {
               type: "text",
-              text: `Success criteria found with the phone number ${phoneNumber}: ${successCriteria}`,
+              text: `Success criteria found with the phone number ${phoneNumber}: ${successCriteria} for ${full_name}`,
             },
           ],
         };
