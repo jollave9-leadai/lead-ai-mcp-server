@@ -3,6 +3,7 @@ import Fuse from "fuse.js";
 import axios from "axios";
 import { BASE_SUPABASE_FUNCTIONS_URL } from "./constants";
 import { google } from "googleapis";
+import { Client } from "@microsoft/microsoft-graph-client";
 
 export const getCustomerWithFuzzySearch = async (
   name: string,
@@ -320,6 +321,62 @@ function createEmailRaw(
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 }
+
+export async function sendOutlookMail(
+  accessToken: string,
+  email: string,
+  emailBody: string
+) {
+  const client = Client.init({
+    authProvider: (done) => {
+      done(null, accessToken); // use OAuth token from NextAuth
+    },
+  });
+
+  await client.api("/me/sendMail").post({
+    message: {
+      subject: "From LeadAI!",
+      body: {
+        contentType: "Text",
+        content: emailBody,
+      },
+      toRecipients: [
+        {
+          emailAddress: {
+            address: email,
+          },
+        },
+      ],
+    },
+  });
+  return "Email from outlook sent successfully";
+}
+
+const sendGmail = async (
+  accessToken: string,
+  toEmail: string,
+  fromEmail: string,
+  emailBody: string
+) => {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: accessToken });
+
+  const gmail = google.gmail({ version: "v1", auth });
+
+  const rawMessage = createEmailRaw(
+    toEmail,
+    fromEmail,
+    "From LeadAI!",
+    emailBody
+  );
+
+  const response = await gmail.users.messages.send({
+    userId: "me",
+    requestBody: { raw: rawMessage },
+  });
+  return response;
+};
+
 export const sendEmail = async (
   client_id: string,
   email: string,
@@ -349,30 +406,30 @@ export const sendEmail = async (
 
   const { data: emailData } = await supabasePersonal
     .from("emails")
-    .select("access_token, refresh_token, email")
+    .select("access_token, refresh_token, email, provider")
     .eq("email", stage?.agent_settings?.email_account || "")
     .eq("client_id", client_id)
     .single();
   console.log("emailData", emailData);
   try {
-    const auth = new google.auth.OAuth2();
-    auth.setCredentials({ access_token: emailData?.access_token || "" });
-
-    const gmail = google.gmail({ version: "v1", auth });
-
-    const rawMessage = createEmailRaw(
-      email,
-      emailData?.email || "",
-      "From LeadAI!",
-      emailBody
-    );
-
-    const response = await gmail.users.messages.send({
-      userId: "me",
-      requestBody: { raw: rawMessage },
-    });
-    console.log("Email response:", response.data);
-    return response.data;
+    if (emailData?.provider === "azure-ad") {
+      const response = await sendOutlookMail(
+        emailData?.access_token || "",
+        email,
+        emailBody
+      );
+      console.log("Outlook Email response:", response);
+      return response;
+    } else {
+      const response = await sendGmail(
+        emailData?.access_token || "",
+        email,
+        emailData?.email || "",
+        emailBody
+      );
+      console.log("Email response:", response.data);
+      return response.data;
+    }
   } catch (smsError) {
     console.error("Failed to send Email:", smsError);
     return null;

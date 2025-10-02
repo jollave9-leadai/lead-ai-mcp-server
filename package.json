@@ -10,6 +10,7 @@
     "inspect": "npx @modelcontextprotocol/inspector@latest"
   },
   "dependencies": {
+    "@microsoft/microsoft-graph-client": "^3.0.7",
     "@modelcontextprotocol/sdk": "^1.17.5",
     "@supabase/supabase-js": "^2.57.4",
     "axios": "^1.11.0",
