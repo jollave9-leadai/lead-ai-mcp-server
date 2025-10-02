@@ -10,6 +10,7 @@ import {
   initiateCall,
   sendSMS,
   sendEmail,
+  getSuccessCriteriaByPhoneNumber,
 } from "@/lib/helpers";
 // import { CreateMessageRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 const handler = createMcpHandler(
@@ -272,7 +273,12 @@ const handler = createMcpHandler(
             ],
           };
         }
-        const response = await sendEmail(clientId, customer.item.email, message, customer.item.pipeline_stage_id);
+        const response = await sendEmail(
+          clientId,
+          customer.item.email,
+          message,
+          customer.item.pipeline_stage_id
+        );
         console.log("response", response);
         if (!response) {
           return {
@@ -289,6 +295,41 @@ const handler = createMcpHandler(
             {
               type: "text",
               text: `Successfully sent Email to ${name}`,
+            },
+          ],
+        };
+      }
+    );
+
+    server.tool(
+      "get-success-criteria",
+      "Get success criteria",
+      {
+        phoneNumber: z.string(),
+        clientId: z.string(), // Injected from the prompt
+      },
+      async ({ phoneNumber, clientId }) => {
+        console.log("Getting success criteria");
+        const successCriteria = await getSuccessCriteriaByPhoneNumber(
+          phoneNumber,
+          clientId
+        );
+        console.log("clientId", clientId);
+        if (!successCriteria) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No success criteria found with the phone number ${phoneNumber}.`,
+              },
+            ],
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Success criteria found with the phone number ${phoneNumber}: ${successCriteria}`,
             },
           ],
         };

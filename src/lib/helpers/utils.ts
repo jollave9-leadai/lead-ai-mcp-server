@@ -151,12 +151,17 @@ export const initiateCall = async (
       ...(vapiIntegration?.serverMessages && {
         serverMessages: vapiIntegration.serverMessages,
       }),
+      serverUrl:
+        "https://weiqhneguxfutfdaxsil.supabase.co/functions/v1/outbound-agent-webhook-receiver",
     },
     type: "outboundPhoneCall",
     phoneNumberId: vapiIntegration?.phoneNumberId,
     phoneNumber: vapiIntegration?.phoneNumber,
     customer: {
       number: phone_number,
+    },
+    metadata: {
+      client_id,
     },
   };
   // console.log("vapiIntegration", vapiIntegration);
@@ -269,6 +274,37 @@ export const getCustomerInformation = async (
     stage,
     customerPipeline: customerPipeline.item,
   };
+};
+
+export const getSuccessCriteriaByPhoneNumber = async (
+  phoneNumber: string,
+  clientId: string
+) => {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  // TODO: replace created_by with client_id
+  const { data: customerPipeLines } = await supabase
+    .from("customer_pipeline_items_with_customers")
+    .select("pipeline_stage_id")
+    .eq("phone_number", phoneNumber)
+    .eq("created_by", clientId)
+    .single();
+
+  console.log("clientId", clientId);
+  console.log("customerPipeLines", customerPipeLines);
+
+  const { data: stage } = await supabase
+    .from("pipeline_stages")
+    .select("success_criteria")
+    .eq("id", customerPipeLines?.pipeline_stage_id)
+    .single();
+  console.log("stage", stage);
+  const successCriteria = stage?.success_criteria;
+  console.log("successCriteria", successCriteria);
+  return successCriteria;
 };
 
 export const sendSMS = async (phone_number: string, smsBody: string) => {
