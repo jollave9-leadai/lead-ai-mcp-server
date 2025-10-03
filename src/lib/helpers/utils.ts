@@ -2,6 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import Fuse from "fuse.js";
 import axios from "axios";
 import { BASE_SUPABASE_FUNCTIONS_URL } from "./constants";
+import { google } from "googleapis";
+import { Client } from "@microsoft/microsoft-graph-client";
 
 export const getCustomerWithFuzzySearch = async (name: string, clientId?: number) => {
   const supabase = createClient(
@@ -281,6 +283,203 @@ export const getCustomerInformation = async (
     stage,
     customerPipeline: customerPipeline.item,
   };
+};
+
+export const getSuccessCriteriaByPhoneNumber = async (
+  phoneNumber: string,
+  clientId: string
+) => {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  // TODO: replace created_by with client_id
+  const { data: customer } = await supabase
+    .from("customer_pipeline_items_with_customers")
+    .select("full_name, pipeline_stage_id")
+    .eq("phone_number", phoneNumber)
+    .eq("created_by", clientId)
+    .single();
+
+  console.log("clientId", clientId);
+  console.log("customer", customer);
+
+  const { data: stage } = await supabase
+    .from("pipeline_stages")
+    .select("success_criteria")
+    .eq("id", customer?.pipeline_stage_id)
+    .single();
+  console.log("stage", stage);
+  const successCriteria = stage?.success_criteria;
+  console.log("successCriteria", successCriteria);
+  console.log("full_name", customer?.full_name);
+  return { successCriteria, full_name: customer?.full_name };
+};
+
+export const sendSMS = async (phone_number: string, smsBody: string) => {
+  const telnyxPayload = {
+    // from: vapi.data.phone_number,
+    from: "+61489900690",
+    messaging_profile_id: "400197bf-b007-4314-9f9f-c5cd0b7b67ae",
+    to: phone_number as string,
+    text: smsBody,
+    subject: "From LeadAI!",
+    use_profile_webhooks: true,
+    type: "SMS",
+  };
+  try {
+    const smsResponse = await axios.post(
+      "https://api.telnyx.com/v2/messages",
+      telnyxPayload,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.TELNYX_API_KEY}`,
+        },
+      }
+    );
+    const smsText = await smsResponse.data;
+    console.log("Telnyx SMS response:", smsText);
+    return smsText;
+  } catch (smsError) {
+    console.error("Failed to send Telnyx SMS:", smsError);
+    return null;
+  }
+};
+
+// Helper: encode email to base64url
+function createEmailRaw(
+  to: string,
+  from: string,
+  subject: string,
+  body: string
+) {
+  const message =
+    `To: ${to}\r\n` +
+    `From: ${from}\r\n` +
+    `Subject: ${subject}\r\n\r\n` +
+    body;
+
+  return Buffer.from(message)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+export async function sendOutlookMail(
+  accessToken: string,
+  email: string,
+  emailBody: string
+) {
+  const client = Client.init({
+    authProvider: (done) => {
+      done(null, accessToken); // use OAuth token from NextAuth
+    },
+  });
+
+  await client.api("/me/sendMail").post({
+    message: {
+      subject: "From LeadAI!",
+      body: {
+        contentType: "Text",
+        content: emailBody,
+      },
+      toRecipients: [
+        {
+          emailAddress: {
+            address: email,
+          },
+        },
+      ],
+    },
+  });
+  return "Email from outlook sent successfully";
+}
+
+const sendGmail = async (
+  accessToken: string,
+  toEmail: string,
+  fromEmail: string,
+  emailBody: string
+) => {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: accessToken });
+
+  const gmail = google.gmail({ version: "v1", auth });
+
+  const rawMessage = createEmailRaw(
+    toEmail,
+    fromEmail,
+    "From LeadAI!",
+    emailBody
+  );
+
+  const response = await gmail.users.messages.send({
+    userId: "me",
+    requestBody: { raw: rawMessage },
+  });
+  return response;
+};
+
+export const sendEmail = async (
+  client_id: string,
+  email: string,
+  emailBody: string,
+  stage_id: string
+) => {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+  const { data: stage } = await supabase
+    .from("pipeline_stages")
+    .select("agent_settings")
+    .eq("id", stage_id)
+    .single();
+  console.log("stage", stage);
+
+  const supabasePersonal = createClient(
+    process.env.NEXT_PUBLIC_PERSONAL_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_PERSONAL_SUPABASE_ANON_KEY!
+  );
+
+  if (!stage?.agent_settings?.email_account) {
+    console.log("No email account found for stage", stage_id);
+    return null;
+  }
+
+  const { data: emailData } = await supabasePersonal
+    .from("emails")
+    .select("access_token, refresh_token, email, provider")
+    .eq("email", stage?.agent_settings?.email_account || "")
+    .eq("client_id", client_id)
+    .single();
+  console.log("emailData", emailData);
+  try {
+    if (emailData?.provider === "azure-ad") {
+      const response = await sendOutlookMail(
+        emailData?.access_token || "",
+        email,
+        emailBody
+      );
+      console.log("Outlook Email response:", response);
+      return response;
+    } else {
+      const response = await sendGmail(
+        emailData?.access_token || "",
+        email,
+        emailData?.email || "",
+        emailBody
+      );
+      console.log("Email response:", response.data);
+      return response.data;
+    }
+  } catch (smsError) {
+    console.error("Failed to send Email:", smsError);
+    return null;
+  }
 };
 
 
