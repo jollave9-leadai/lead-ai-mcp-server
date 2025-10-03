@@ -11,6 +11,11 @@ import {
   searchCalendarEventsForClient,
   findAvailableSlotsForClient,
 } from "@/lib/helpers/calendar_functions";
+import { 
+  getCustomerWithFuzzySearch, 
+  getAgentByCalendarConnection, 
+  isWithinOfficeHours 
+} from "@/lib/helpers/utils";
 import type {
   GetGraphEventsRequest,
   CreateGraphEventMCPRequest,
@@ -22,29 +27,29 @@ const handler = createMcpHandler(
     //GetCalendarEvents
     server.tool(
       "GetCalendarEvents",
-      "Get calendar events for a client from Microsoft Graph. Client timezone is automatically retrieved from database. Supports natural language date requests like 'today', 'tomorrow', 'this week', 'upcoming'.",
+      "Retrieve calendar events for a client. Automatically handles timezone conversion based on client settings.",
       {
         clientId: z
           .union([z.number(), z.string().transform(Number)])
-          .describe("The ID of the client to get events for"),
+          .describe("Client ID number (e.g., 10000001)"),
         dateRequest: z
           .string()
           .optional()
           .describe(
-            "Natural language date request (e.g., 'today', 'tomorrow', 'this week', 'upcoming')"
+            "Natural language date: 'today', 'tomorrow', 'this week', 'next monday', 'upcoming'"
           ),
         calendarId: z
           .string()
           .optional()
-          .describe("Specific calendar ID (defaults to primary calendar)"),
+          .describe("Calendar ID (optional, uses primary calendar if not specified)"),
         startDate: z
           .string()
           .optional()
-          .describe("Start date in ISO 8601 format (alternative to dateRequest)"),
+          .describe("Start date: '2025-10-06T09:00:00' (use instead of dateRequest for specific dates)"),
         endDate: z
           .string()
           .optional()
-          .describe("End date in ISO 8601 format (alternative to dateRequest)"),
+          .describe("End date: '2025-10-06T17:00:00' (use with startDate for date range)"),
       },
       async (input) => {
         try {
@@ -90,7 +95,7 @@ const handler = createMcpHandler(
               content: [
                 {
                   type: "text",
-                  text: `Error retrieving calendar events: ${result.error}`,
+                  text: `❌ **EVENTS ERROR**: ${result.error}`,
                 },
               ],
             };
@@ -100,7 +105,7 @@ const handler = createMcpHandler(
               content: [
                 {
                   type: "text",
-                  text: `**Microsoft Calendar Events for Client ID: ${numericClientId}**\n\n${result.formattedEvents}`,
+                  text: result.formattedEvents || '📅 No events found',
                 },
               ],
             };
@@ -122,39 +127,47 @@ const handler = createMcpHandler(
     //CreateCalendarEvent
     server.tool(
       "CreateCalendarEvent",
-      "Create a new calendar event for a client using Microsoft Graph. Client timezone is automatically retrieved from database. Creates events directly in the user's Microsoft calendar.",
+      "Book a new calendar appointment. Automatically checks for conflicts, validates office hours, and sends email invitations. Searches customer database if name is provided.",
       {
         clientId: z
           .union([z.number(), z.string().transform(Number)])
-          .describe("The ID of the client to create event for"),
-        subject: z.string().describe("Title/subject of the event"),
+          .describe("Client ID number (e.g., 10000001)"),
+        subject: z.string().describe("Meeting title (e.g., 'Sales Call with John Smith')"),
         startDateTime: z
           .string()
-          .describe("Start date/time in ISO 8601 format"),
+          .describe("Start time: '2025-10-06T13:00:00' (must be at least 15 minutes in future)"),
         endDateTime: z
           .string()
-          .describe("End date/time in ISO 8601 format"),
-        attendeeEmail: z.string().email().describe("Email of the attendee"),
+          .describe("End time: '2025-10-06T14:00:00' (must be after start time)"),
+        customerName: z
+          .string()
+          .optional()
+          .describe("Customer name to search in database: 'John Smith' (finds email automatically)"),
+        attendeeEmail: z
+          .string()
+          .email()
+          .optional()
+          .describe("Attendee email: 'john@company.com' (required if customer not found in database)"),
         attendeeName: z
           .string()
           .optional()
-          .describe("Name of the attendee"),
+          .describe("Attendee display name: 'John Smith' (auto-filled from customer database)"),
         description: z
           .string()
           .optional()
-          .describe("Description/body of the event"),
+          .describe("Meeting description or notes (optional)"),
         location: z
           .string()
           .optional()
-          .describe("Location of the event"),
+          .describe("Meeting location: 'Conference Room A' or address (optional)"),
         isOnlineMeeting: z
           .boolean()
           .optional()
-          .describe("Whether to create as an online Teams meeting"),
+          .describe("Create Teams meeting: true/false (default: false)"),
         calendarId: z
           .string()
           .optional()
-          .describe("Specific calendar ID (defaults to primary calendar)"),
+          .describe("Calendar ID (optional, uses primary calendar if not specified)"),
       },
       async (input) => {
         try {
@@ -163,6 +176,7 @@ const handler = createMcpHandler(
             subject,
             startDateTime,
             endDateTime,
+            customerName,
             attendeeEmail,
             attendeeName,
             description,
@@ -189,13 +203,159 @@ const handler = createMcpHandler(
             };
           }
 
+          // Customer lookup logic
+          let finalAttendeeEmail = attendeeEmail;
+          let finalAttendeeName = attendeeName;
+          let customerFound = false;
+
+          // If customerName is provided, search in customer database first
+          if (customerName) {
+            console.log(`🔍 Searching for customer: "${customerName}" for client ${numericClientId}`);
+            
+            try {
+              const customerResults = await getCustomerWithFuzzySearch(customerName, numericClientId);
+              
+              if (customerResults && customerResults.length > 0) {
+                const bestMatch = customerResults[0];
+                const customer = bestMatch.item;
+                
+                console.log(`✅ Found customer match:`, {
+                  score: bestMatch.score,
+                  customer: {
+                    id: customer.id,
+                    full_name: customer.full_name,
+                    email: customer.email,
+                    company: customer.company
+                  }
+                });
+
+                if (customer.email) {
+                  finalAttendeeEmail = customer.email;
+                  finalAttendeeName = customer.full_name || attendeeName;
+                  customerFound = true;
+                  
+                  console.log(`📧 Using customer email: ${finalAttendeeEmail} (${finalAttendeeName})`);
+                } else {
+                  console.log(`⚠️ Customer found but no email address available`);
+                }
+              } else {
+                console.log(`❌ No customer found matching: "${customerName}"`);
+              }
+            } catch (error) {
+              console.error('Error searching for customer:', error);
+            }
+          }
+
+          // Validate that we have an email address
+          if (!finalAttendeeEmail) {
+            let errorMessage = "Error: ";
+            if (customerName && !customerFound) {
+              errorMessage += `Customer "${customerName}" not found in database. Please provide attendeeEmail manually, or check the customer name spelling.`;
+            } else if (customerName && customerFound) {
+              errorMessage += `Customer "${customerName}" found but has no email address. Please provide attendeeEmail manually.`;
+            } else {
+              errorMessage += "Either customerName (to search database) or attendeeEmail is required.";
+            }
+            
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: errorMessage,
+                },
+              ],
+            };
+          }
+
+          // Validate that the booking is not in the past
+          console.log(`🕐 Validating booking time is not in the past...`)
+          
+          const now = new Date()
+          const requestedStart = new Date(startDateTime)
+          const minimumAdvanceMinutes = 15 // Minimum 15 minutes in advance
+          const minimumBookingTime = new Date(now.getTime() + minimumAdvanceMinutes * 60 * 1000)
+          
+          console.log(`🕐 Current time: ${now.toISOString()}`)
+          console.log(`🕐 Requested start: ${requestedStart.toISOString()}`)
+          console.log(`🕐 Minimum booking time: ${minimumBookingTime.toISOString()} (${minimumAdvanceMinutes} min advance)`)
+          
+          const timeDifference = Math.floor((requestedStart.getTime() - now.getTime()) / (1000 * 60))
+          
+          if (requestedStart <= minimumBookingTime) {
+            const errorMessage = timeDifference <= 0 
+              ? `❌ **INVALID TIME**: Cannot book in the past\n\n⏰ Earliest available: ${minimumBookingTime.toLocaleString()}`
+              : `❌ **TOO SOON**: Minimum ${minimumAdvanceMinutes} minutes advance required\n\n⏰ Earliest available: ${minimumBookingTime.toLocaleString()}`
+            
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: errorMessage,
+                },
+              ],
+            }
+          }
+          
+          console.log(`✅ Booking time is valid (${timeDifference} minutes in the future)`)
+
+          // Get calendar connection to find assigned agent and office hours
+          console.log(`🏢 Checking office hours for calendar booking...`);
+          
+          // We need to get the calendar connection ID first
+          const { getCalendarConnectionByClientId } = await import("@/lib/helpers/calendar_functions");
+          const connection = await getCalendarConnectionByClientId(numericClientId);
+          
+          if (!connection) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "Error: No calendar connection found for this client. Please connect a Microsoft calendar first.",
+                },
+              ],
+            };
+          }
+
+          // Get agent assigned to this calendar connection
+          const agentAssignment = await getAgentByCalendarConnection(connection.id, numericClientId);
+          
+          if (agentAssignment && agentAssignment.agents && (agentAssignment.agents as any).profiles) {
+            const agent = agentAssignment.agents as any;
+            const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles;
+            
+            console.log(`👤 Found assigned agent: ${agent.name} (Profile: ${profile.name})`);
+            console.log(`🏢 Office hours:`, profile.office_hours);
+            
+            // Check if the requested time is within office hours
+            const officeHoursCheck = isWithinOfficeHours(
+              startDateTime, 
+              profile.office_hours, 
+              profile.timezone || 'Australia/Melbourne'
+            );
+            
+            if (!officeHoursCheck.isWithin) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `❌ **OUTSIDE OFFICE HOURS**\n\n${officeHoursCheck.reason}\n\n👤 Agent: ${agent.name}`,
+                  },
+                ],
+              };
+            }
+            
+            console.log(`✅ Requested time is within office hours for agent ${agent.name}`);
+          } else {
+            console.log(`⚠️ No agent assignment found for calendar connection. Proceeding without office hours validation.`);
+          }
+
           const request: CreateGraphEventMCPRequest = {
             clientId: numericClientId,
             subject,
             startDateTime,
             endDateTime,
-            attendeeEmail,
-            attendeeName,
+            attendeeEmail: finalAttendeeEmail,
+            attendeeName: finalAttendeeName,
             description,
             location,
             isOnlineMeeting,
@@ -205,36 +365,49 @@ const handler = createMcpHandler(
           const result = await createCalendarEventForClient(numericClientId, request);
 
           if (!result.success) {
+            // Check if it's a conflict with suggested slots
+            if (result.availableSlots && result.availableSlots.length > 0) {
+              let conflictText = `❌ **SCHEDULING CONFLICT**\n\n`;
+              conflictText += `📅 **Alternative Slots:**\n`;
+              result.availableSlots.forEach((slot, index) => {
+                conflictText += `${index + 1}. ${slot.startMelbourne} - ${slot.endMelbourne}\n`;
+              });
+              
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: conflictText,
+                  },
+                ],
+              };
+            }
+            
             return {
               content: [
                 {
                   type: "text",
-                  text: `**Event Creation Failed**\n\n**Error**: ${result.error}\n\n**Client ID**: ${numericClientId}\n**Subject**: ${subject}\n**Start Time**: ${startDateTime}\n**Attendee**: ${attendeeName || attendeeEmail}`,
+                  text: `❌ **BOOKING FAILED**\n\n${result.error}`,
                 },
               ],
             };
           }
 
-          let responseText = `**CALENDAR EVENT CREATED SUCCESSFULLY!**\n\n`;
-          responseText += `**Event Details:**\n`;
-          responseText += `- **Event ID**: ${result.eventId}\n`;
-          responseText += `- **Subject**: ${result.event?.subject}\n`;
-          responseText += `- **Start Time**: ${new Date(result.event?.start.dateTime || startDateTime).toLocaleString("en-US")}\n`;
-          responseText += `- **End Time**: ${new Date(result.event?.end.dateTime || endDateTime).toLocaleString("en-US")}\n`;
-          responseText += `- **Attendee**: ${attendeeName || attendeeEmail}\n`;
-          responseText += `- **Client ID**: ${numericClientId}\n`;
-
+          let responseText = `✅ **BOOKING CONFIRMED**\n\n`;
+          responseText += `**${result.event?.subject}**\n`;
+          responseText += `📅 ${new Date(result.event?.start.dateTime || startDateTime).toLocaleDateString("en-US", { weekday: 'short', month: 'short', day: 'numeric' })}\n`;
+          responseText += `🕐 ${new Date(result.event?.start.dateTime || startDateTime).toLocaleTimeString("en-US", { hour: '2-digit', minute: '2-digit' })} - ${new Date(result.event?.end.dateTime || endDateTime).toLocaleTimeString("en-US", { hour: '2-digit', minute: '2-digit' })}\n`;
+          responseText += `👤 ${finalAttendeeName || finalAttendeeEmail}\n`;
+          
           if (result.event?.location?.displayName) {
-            responseText += `- **Location**: ${result.event.location.displayName}\n`;
+            responseText += `📍 ${result.event.location.displayName}\n`;
           }
 
           if (result.event?.onlineMeeting?.joinUrl) {
-            responseText += `- **Teams Meeting**: ${result.event.onlineMeeting.joinUrl}\n`;
+            responseText += `💻 Teams Meeting Available\n`;
           }
-
-          if (result.event?.webLink) {
-            responseText += `- **Calendar Link**: ${result.event.webLink}\n`;
-          }
+          
+          responseText += `\n🆔 ${result.eventId}`;
 
           return {
             content: [
@@ -262,42 +435,42 @@ const handler = createMcpHandler(
     //UpdateCalendarEvent
     server.tool(
       "UpdateCalendarEvent",
-      "Update an existing calendar event for a client using Microsoft Graph. Client timezone is automatically retrieved from database.",
+      "Modify an existing calendar appointment. Automatically sends update notifications to attendees.",
       {
         clientId: z
           .union([z.number(), z.string().transform(Number)])
-          .describe("The ID of the client who owns the event"),
-        eventId: z.string().describe("The ID of the event to update"),
-        subject: z.string().optional().describe("New title/subject of the event"),
+          .describe("Client ID number (e.g., 10000001)"),
+        eventId: z.string().describe("Event ID to update (e.g., 'AAMkAGQ5ZjU...')"),
+        subject: z.string().optional().describe("New meeting title (optional)"),
         startDateTime: z
           .string()
           .optional()
-          .describe("New start date/time in ISO 8601 format"),
+          .describe("New start time: '2025-10-06T13:00:00' (optional)"),
         endDateTime: z
           .string()
           .optional()
-          .describe("New end date/time in ISO 8601 format"),
+          .describe("New end time: '2025-10-06T14:00:00' (optional)"),
         attendeeEmail: z
           .string()
           .email()
           .optional()
-          .describe("New attendee email"),
+          .describe("New attendee email: 'jane@company.com' (optional)"),
         attendeeName: z
           .string()
           .optional()
-          .describe("New attendee name"),
+          .describe("New attendee name: 'Jane Doe' (optional)"),
         description: z
           .string()
           .optional()
-          .describe("New description/body of the event"),
+          .describe("New meeting description (optional)"),
         location: z
           .string()
           .optional()
-          .describe("New location of the event"),
+          .describe("New location: 'Conference Room B' (optional)"),
         calendarId: z
           .string()
           .optional()
-          .describe("Specific calendar ID (defaults to primary calendar)"),
+          .describe("Calendar ID (optional, uses primary calendar if not specified)"),
       },
       async (input) => {
         try {
@@ -401,16 +574,16 @@ const handler = createMcpHandler(
 //DeleteCalendarEvent
     server.tool(
       "DeleteCalendarEvent",
-      "Delete a calendar event for a client using Microsoft Graph.",
+      "Cancel a calendar appointment. Automatically sends cancellation notifications to attendees.",
       {
         clientId: z
           .union([z.number(), z.string().transform(Number)])
-          .describe("The ID of the client who owns the event"),
-        eventId: z.string().describe("The ID of the event to delete"),
+          .describe("Client ID number (e.g., 10000001)"),
+        eventId: z.string().describe("Event ID to cancel (e.g., 'AAMkAGQ5ZjU...')"),
         calendarId: z
           .string()
           .optional()
-          .describe("Specific calendar ID (defaults to primary calendar)"),
+          .describe("Calendar ID (optional, uses primary calendar if not specified)"),
       },
       async (input) => {
         try {
@@ -473,26 +646,26 @@ const handler = createMcpHandler(
     //SearchCalendarEvents
     server.tool(
       "SearchCalendarEvents",
-      "Search for calendar events by subject/title for a client using Microsoft Graph. Client timezone is automatically retrieved from database.",
+      "Find calendar events by searching meeting titles. Useful for locating specific appointments.",
       {
         clientId: z
           .union([z.number(), z.string().transform(Number)])
-          .describe("The ID of the client to search events for"),
+          .describe("Client ID number (e.g., 10000001)"),
         searchQuery: z
           .string()
-          .describe("Search query to match against event subjects"),
+          .describe("Search text: 'John Smith' or 'Sales Meeting' (searches meeting titles)"),
         startDate: z
           .string()
           .optional()
-          .describe("Start date to limit search (ISO 8601 format)"),
+          .describe("Search from date: '2025-10-01T00:00:00' (optional)"),
         endDate: z
           .string()
           .optional()
-          .describe("End date to limit search (ISO 8601 format)"),
+          .describe("Search until date: '2025-10-31T23:59:59' (optional)"),
         calendarId: z
           .string()
           .optional()
-          .describe("Specific calendar ID (defaults to primary calendar)"),
+          .describe("Calendar ID (optional, uses primary calendar if not specified)"),
       },
       async (input) => {
         try {
@@ -571,14 +744,14 @@ const handler = createMcpHandler(
         }
       }
     );
-//GetCalendars
+    //GetCalendars
     server.tool(
       "GetCalendars",
-      "Get all calendars for a client from Microsoft Graph.",
+      "List all available calendars for a client. Shows primary and secondary calendars.",
       {
         clientId: z
           .union([z.number(), z.string().transform(Number)])
-          .describe("The ID of the client to get calendars for"),
+          .describe("Client ID number (e.g., 10000001)"),
       },
       async (input) => {
         try {
@@ -663,14 +836,14 @@ const handler = createMcpHandler(
         }
       }
     );
-//CheckCalendarConnection
+    //CheckCalendarConnection
     server.tool(
       "CheckCalendarConnection",
-      "Check if a client has connected Microsoft calendars and get connection summary.",
+      "Verify if a client has Microsoft calendar connected. Shows connection status and details.",
       {
         clientId: z
           .union([z.number(), z.string().transform(Number)])
-          .describe("The ID of the client to check calendar connection for"),
+          .describe("Client ID number (e.g., 10000001)"),
       },
       async (input) => {
         try {
@@ -760,25 +933,25 @@ const handler = createMcpHandler(
     //GetAvailability
     server.tool(
       "GetAvailability",
-      "Get availability/free-busy information for a client using Microsoft Graph. Client timezone is automatically retrieved from database.",
+      "Check when people are free or busy. Shows detailed availability information for scheduling.",
       {
         clientId: z
           .union([z.number(), z.string().transform(Number)])
-          .describe("The ID of the client to get availability for"),
+          .describe("Client ID number (e.g., 10000001)"),
         startDate: z
           .string()
-          .describe("Start date/time in ISO 8601 format"),
+          .describe("Check from: '2025-10-06T09:00:00'"),
         endDate: z
           .string()
-          .describe("End date/time in ISO 8601 format"),
+          .describe("Check until: '2025-10-06T17:00:00'"),
         emails: z
           .array(z.string().email())
           .optional()
-          .describe("Email addresses to check availability for (defaults to client's email)"),
+          .describe("Email addresses to check: ['john@company.com'] (optional, uses client email if not provided)"),
         intervalInMinutes: z
           .number()
           .optional()
-          .describe("Interval in minutes for availability slots (default: 60)"),
+          .describe("Time slot intervals: 15, 30, 60 minutes (default: 60)"),
       },
       async (input) => {
         try {
@@ -880,27 +1053,27 @@ const handler = createMcpHandler(
     //FindAvailableSlots
     server.tool(
       "FindAvailableSlots",
-      "Find available time slots near a requested time for a client using Microsoft Graph. Suggests alternative slots if the requested time conflicts with existing events.",
+      "Check availability and suggest alternative time slots. Considers existing appointments and office hours.",
       {
         clientId: z
           .union([z.number(), z.string().transform(Number)])
-          .describe("The ID of the client to find available slots for"),
+          .describe("Client ID number (e.g., 10000001)"),
         requestedStartTime: z
           .string()
-          .describe("Requested start date/time in ISO 8601 format"),
+          .describe("Preferred start time: '2025-10-06T13:00:00'"),
         requestedEndTime: z
           .string()
-          .describe("Requested end date/time in ISO 8601 format"),
+          .describe("Preferred end time: '2025-10-06T14:00:00'"),
         durationMinutes: z
           .number()
           .optional()
           .default(60)
-          .describe("Duration of the appointment in minutes (default: 60)"),
+          .describe("Meeting duration in minutes: 30, 60, 90 (default: 60)"),
         maxSuggestions: z
           .number()
           .optional()
           .default(5)
-          .describe("Maximum number of alternative slots to suggest (default: 5)"),
+          .describe("Number of alternative slots to suggest: 3-10 (default: 5)"),
       },
       async (input) => {
         try {
