@@ -205,11 +205,9 @@ export const getNextPipeLineStage = async (
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
-  
-  
   const { data: pipeline } = await supabase
     .from("pipelines")
-    .select("id, pipeline_stages(id, sort_order)")
+    .select("id, pipeline_stages(id, sort_order, name)")
     .order("sort_order", {
       referencedTable: "pipeline_stages",
       ascending: true,
@@ -245,23 +243,34 @@ export const moveLeadToNextStage = async (
   );
 };
 
-export const getCustomerInformation = async (fullName: string) => {
+export const getCustomerInformation = async (
+  fullName: string,
+  clientId: string
+) => {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
-  
+
+  // TODO: replace created_by with client_id
   const { data: customerPipeLines } = await supabase
     .from("customer_pipeline_items_with_customers")
     .select(
       "full_name,email, company, job_title, customer_status, customer_type, source, address, city, state, postal_code, country, phone_number, pipeline_stage_id"
-    );
+    )
+    .eq("created_by", clientId);
+
+  console.log("clientId", clientId);
+  console.log("customerPipeLines", customerPipeLines);
 
   const fuse = new Fuse(customerPipeLines || [], {
     keys: ["full_name"], // fields to search
     threshold: 0.3, // how fuzzy (0 = exact, 1 = very fuzzy)
   });
   const [customerPipeline] = fuse.search(fullName);
+  console.log("customerPipeline", customerPipeline);
+  if (!customerPipeline) return;
+
   const { data: stage } = await supabase
     .from("pipeline_stages")
     .select("name, description, sort_order")
@@ -273,6 +282,7 @@ export const getCustomerInformation = async (fullName: string) => {
     customerPipeline: customerPipeline.item,
   };
 };
+
 
 /**
  * Get agent assigned to a calendar connection
