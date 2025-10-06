@@ -340,12 +340,12 @@ export const sendSMS = async (phone_number: string, smsBody: string) => {
 };
 
 // Helper: encode email to base64url
-function createEmailRaw(
+const createEmailRaw = (
   to: string,
   from: string,
   subject: string,
   body: string
-) {
+) => {
   const message =
     `To: ${to}\r\n` +
     `From: ${from}\r\n` +
@@ -357,7 +357,66 @@ function createEmailRaw(
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
-}
+};
+
+// Helper: refresh token for email
+const handleRefreshToken = async (
+  refreshToken: string,
+  provider: string,
+) => {
+  let newAccessToken = null;
+  let newRefreshToken = null;
+  let newExpiresAt = null;
+  if (provider === "azure-ad") {
+    const response = await axios.post(
+      "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      {
+        refresh_token: refreshToken,
+        client_id: process.env.MICROSOFT_CLIENT_ID,
+        client_secret: process.env.MICROSOFT_CLIENT_SECRET,
+        grant_type: "refresh_token",
+        scope:
+          "https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.Send offline_access",
+      },
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
+    newAccessToken = response.data.access_token;
+    newRefreshToken = response.data.refresh_token;
+    newExpiresAt = new Date(
+      Date.now() + response.data.expires_in * 1000
+    ).toISOString();
+  } else {
+    const response = await axios.post(
+      "https://oauth2.googleapis.com/token",
+      {
+        refresh_token: refreshToken,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        grant_type: "refresh_token",
+      },
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
+    newAccessToken = response.data.access_token;
+    newRefreshToken = response.data.refresh_token;
+    newExpiresAt = new Date(
+      Date.now() + response.data.expires_in * 1000
+    ).toISOString();
+  }
+
+  return {
+    access_token: newAccessToken,
+    refresh_token: newRefreshToken,
+    expires_at: newExpiresAt,
+  };
+};
 
 export async function sendOutlookMail(
   accessToken: string,
@@ -431,27 +490,47 @@ export const sendEmail = async (
     .single();
   console.log("stage", stage);
 
-  const supabasePersonal = createClient(
-    process.env.NEXT_PUBLIC_PERSONAL_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_PERSONAL_SUPABASE_ANON_KEY!
-  );
-
   if (!stage?.agent_settings?.email_account) {
     console.log("No email account found for stage", stage_id);
     return null;
   }
 
-  const { data: emailData } = await supabasePersonal
+  const { data: emailData } = await supabase
     .from("emails")
-    .select("access_token, refresh_token, email, provider")
+    .select("*")
     .eq("email", stage?.agent_settings?.email_account || "")
     .eq("client_id", client_id)
     .single();
   console.log("emailData", emailData);
+
   try {
+    // Handle token refresh
+    const expiresAt = emailData.expires_at * 1000; // convert to ms
+    let accessToken = emailData.access_token;
+    let refreshToken = emailData.refresh_token;
+    if (Date.now() >= expiresAt) {
+      const refreshedToken = await handleRefreshToken(
+        refreshToken,
+        emailData.provider,
+      );
+      if (refreshedToken) {
+        // Store the refreshed token in the database
+        await supabase
+          .from("emails")
+          .update({
+            access_token: refreshedToken.access_token,
+            refresh_token: refreshedToken.refresh_token,
+            expires_at: refreshedToken.expires_at,
+          })
+          .eq("email", emailData.email)
+          .eq("client_id", client_id);
+        accessToken = refreshedToken.access_token;
+        refreshToken = refreshedToken.refresh_token;
+      }
+    }
     if (emailData?.provider === "azure-ad") {
       const response = await sendOutlookMail(
-        emailData?.access_token || "",
+        accessToken,
         email,
         emailBody
       );
@@ -459,7 +538,7 @@ export const sendEmail = async (
       return response;
     } else {
       const response = await sendGmail(
-        emailData?.access_token || "",
+        accessToken,
         email,
         emailData?.email || "",
         emailBody
