@@ -1,17 +1,13 @@
 import { z } from "zod";
 import { createMcpHandler } from "mcp-handler";
 import {
-  getCalendarEventsForClient,
-  createCalendarEventForClient,
   updateCalendarEventForClient,
-  deleteCalendarEventForClient,
   getCalendarsForClient,
-  getAvailabilityForClient,
   checkClientCalendarConnection,
-  searchCalendarEventsForClient,
-  findAvailableSlotsForClient,
 } from "@/lib/helpers/calendar_functions";
-import { 
+import { FinalOptimizedCalendarOperations } from "@/lib/helpers/calendar_functions/finalOptimizedCalendarOperations";
+import { AdvancedCacheService } from "@/lib/helpers/cache/advancedCacheService";
+import {
   getCustomerWithFuzzySearch, 
   getAgentByCalendarConnection, 
   isWithinOfficeHours 
@@ -88,7 +84,7 @@ const handler = createMcpHandler(
           };
           console.log("Request: ", request)
 
-          const result = await getCalendarEventsForClient(numericClientId, request);
+          const result = await FinalOptimizedCalendarOperations.getCalendarEventsForClient(numericClientId, request);
 
           if (!result.success) {
             return {
@@ -213,7 +209,7 @@ const handler = createMcpHandler(
             console.log(`🔍 Searching for customer: "${customerName}" for client ${numericClientId}`);
             
             try {
-              const customerResults = await getCustomerWithFuzzySearch(customerName, numericClientId);
+              const customerResults = await getCustomerWithFuzzySearch(customerName, numericClientId.toString());
               
               if (customerResults && customerResults.length > 0) {
                 const bestMatch = customerResults[0];
@@ -235,7 +231,7 @@ const handler = createMcpHandler(
                   customerFound = true;
                   
                   console.log(`📧 Using customer email: ${finalAttendeeEmail} (${finalAttendeeName})`);
-                } else {
+          } else {
                   console.log(`⚠️ Customer found but no email address available`);
                 }
               } else {
@@ -255,17 +251,17 @@ const handler = createMcpHandler(
               errorMessage += `Customer "${customerName}" found but has no email address. Please provide attendeeEmail manually.`;
             } else {
               errorMessage += "Either customerName (to search database) or attendeeEmail is required.";
-            }
-            
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: errorMessage,
-                },
-              ],
-            };
           }
+
+          return {
+            content: [
+              {
+                type: "text",
+                  text: errorMessage,
+              },
+            ],
+          };
+        }
 
           // Validate that the booking is not in the past
           console.log(`🕐 Validating booking time is not in the past...`)
@@ -319,13 +315,24 @@ const handler = createMcpHandler(
           // Get agent assigned to this calendar connection
           const agentAssignment = await getAgentByCalendarConnection(connection.id, numericClientId);
           
-          if (agentAssignment && agentAssignment.agents && (agentAssignment.agents as any).profiles) {
-            const agent = agentAssignment.agents as any;
+          if (agentAssignment && agentAssignment.agents) {
+            const agent = agentAssignment.agents as unknown as {
+              id: number;
+              name: string;
+              profiles: {
+                id: number;
+                name: string;
+                office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+                timezone: string;
+              } | {
+                id: number;
+                name: string;
+                office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+                timezone: string;
+              }[];
+            };
+            
             const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles;
-            
-            console.log(`👤 Found assigned agent: ${agent.name} (Profile: ${profile.name})`);
-            console.log(`🏢 Office hours:`, profile.office_hours);
-            
             // Check if the requested time is within office hours
             const officeHoursCheck = isWithinOfficeHours(
               startDateTime, 
@@ -334,15 +341,15 @@ const handler = createMcpHandler(
             );
             
             if (!officeHoursCheck.isWithin) {
-              return {
-                content: [
-                  {
-                    type: "text",
+          return {
+            content: [
+              {
+                type: "text",
                     text: `❌ **OUTSIDE OFFICE HOURS**\n\n${officeHoursCheck.reason}\n\n👤 Agent: ${agent.name}`,
-                  },
-                ],
-              };
-            }
+              },
+            ],
+          };
+        }
             
             console.log(`✅ Requested time is within office hours for agent ${agent.name}`);
           } else {
@@ -362,27 +369,27 @@ const handler = createMcpHandler(
             calendarId,
           };
 
-          const result = await createCalendarEventForClient(numericClientId, request);
+          const result = await FinalOptimizedCalendarOperations.createCalendarEventForClient(numericClientId, request);
 
           if (!result.success) {
             // Check if it's a conflict with suggested slots
             if (result.availableSlots && result.availableSlots.length > 0) {
-              let conflictText = `❌ **SCHEDULING CONFLICT**\n\n`;
-              conflictText += `📅 **Alternative Slots:**\n`;
+              let conflictText = `**SCHEDULING CONFLICT**\n\n`;
+              conflictText += `**Alternative Slots:**\n`;
               result.availableSlots.forEach((slot, index) => {
-                conflictText += `${index + 1}. ${slot.startMelbourne} - ${slot.endMelbourne}\n`;
+                conflictText += `${index + 1}. ${slot.startFormatted} - ${slot.endFormatted}\n`;
               });
               
-              return {
-                content: [
-                  {
-                    type: "text",
+            return {
+              content: [
+                {
+                  type: "text",
                     text: conflictText,
-                  },
-                ],
-              };
-            }
-            
+                },
+              ],
+            };
+          }
+
             return {
               content: [
                 {
@@ -505,6 +512,53 @@ const handler = createMcpHandler(
             };
           }
 
+          // If updating time, validate office hours and past time first
+          if (startDateTime && endDateTime) {
+            console.log(`🔍 Validating update time: ${startDateTime} to ${endDateTime}`)
+            
+            // Check if trying to schedule in the past
+            const now = new Date()
+            const requestedStart = new Date(startDateTime)
+            const minimumTime = new Date(now.getTime() + 15 * 60 * 1000) // 15 minutes from now
+            
+            if (requestedStart < minimumTime) {
+              console.log(`❌ PAST TIME VIOLATION: Trying to schedule in the past`)
+            return {
+              content: [
+                {
+                  type: "text",
+                    text: `**UPDATE BLOCKED - PAST TIME**\n\n**Error**: Cannot schedule appointments in the past or less than 15 minutes from now.\n\n**Requested Time**: ${requestedStart.toLocaleString('en-US')}\n**Current Time**: ${now.toLocaleString('en-US')}\n\nPlease choose a future time.`,
+                },
+              ],
+            };
+          }
+
+            // Get agent assigned to this calendar connection
+            const connection = await AdvancedCacheService.getClientCalendarData(numericClientId);
+            
+            if (connection && connection.agentOfficeHours) {
+              const officeHoursCheck = isWithinOfficeHours(
+                startDateTime, 
+                connection.agentOfficeHours, 
+                connection.agentTimezone || 'Australia/Melbourne'
+              );
+              
+              if (!officeHoursCheck.isWithin) {
+                console.log(`❌ OFFICE HOURS VIOLATION: ${officeHoursCheck.reason}`)
+            return {
+              content: [
+                {
+                  type: "text",
+                      text: `**UPDATE BLOCKED - OUTSIDE OFFICE HOURS**\n\n**Reason**: ${officeHoursCheck.reason || 'The requested time is outside business hours'}\n\n**Requested Time**: ${requestedStart.toLocaleString('en-US')} - ${new Date(endDateTime).toLocaleString('en-US')}\n\nPlease choose a time within office hours.`,
+                },
+              ],
+            };
+          }
+
+              console.log(`✅ OFFICE HOURS CHECK: Update time is within office hours`)
+            }
+          }
+
           const updates: Partial<CreateGraphEventMCPRequest> = {
             subject,
             startDateTime,
@@ -607,7 +661,7 @@ const handler = createMcpHandler(
             };
           }
 
-          const result = await deleteCalendarEventForClient(numericClientId, eventId, calendarId);
+          const result = await FinalOptimizedCalendarOperations.deleteCalendarEventForClient(numericClientId, eventId, calendarId);
 
           if (!result.success) {
             return {
@@ -624,7 +678,7 @@ const handler = createMcpHandler(
             content: [
               {
                 type: "text",
-                text: `**CALENDAR EVENT DELETED SUCCESSFULLY!**\n\n**Event ID**: ${eventId}\n**Client ID**: ${numericClientId}`,
+                text: `**APPOINTMENT CANCELLED SUCCESSFULLY**\n\n✅ **Event Deleted**: ${eventId}\n📧 **Cancellation notifications sent** to all attendees\n👤 **Client ID**: ${numericClientId}`,
               },
             ],
           };
@@ -679,7 +733,7 @@ const handler = createMcpHandler(
           
           console.log("search calendar events (Microsoft Graph)");
           console.table(input);
-          
+
           // Convert and validate clientId
           const numericClientId =
             typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
@@ -695,7 +749,7 @@ const handler = createMcpHandler(
             };
           }
 
-          const result = await searchCalendarEventsForClient(
+          const result = await FinalOptimizedCalendarOperations.searchCalendarEventsForClient(
             numericClientId,
             searchQuery,
             { startDate, endDate, calendarId }
@@ -813,14 +867,14 @@ const handler = createMcpHandler(
             });
             }
 
-            return {
-              content: [
-                {
-                  type: "text",
+          return {
+            content: [
+              {
+                type: "text",
                   text: responseText,
-                },
-              ],
-            };
+              },
+            ],
+          };
         } catch (error) {
           console.error("Error in GetCalendars:", error);
           return {
@@ -965,7 +1019,7 @@ const handler = createMcpHandler(
           
           console.log("get availability (Microsoft Graph)");
           console.table(input);
-          
+
           // Convert and validate clientId
           const numericClientId =
             typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
@@ -989,6 +1043,8 @@ const handler = createMcpHandler(
             intervalInMinutes,
           };
 
+          // Use legacy function for availability (not yet optimized)
+          const { getAvailabilityForClient } = await import("@/lib/helpers/calendar_functions");
           const result = await getAvailabilityForClient(numericClientId, request);
 
           if (!result.success) {
@@ -1087,7 +1143,7 @@ const handler = createMcpHandler(
           
           console.log("find available slots (Microsoft Graph)");
           console.table(input);
-          
+
           // Convert and validate clientId
           const numericClientId =
             typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
@@ -1103,7 +1159,7 @@ const handler = createMcpHandler(
             };
           }
 
-          const result = await findAvailableSlotsForClient(
+          const result = await FinalOptimizedCalendarOperations.findAvailableSlotsForClient(
             numericClientId,
             requestedStartTime,
             requestedEndTime,
@@ -1129,7 +1185,7 @@ const handler = createMcpHandler(
             responseText += `**✅ REQUESTED TIME IS AVAILABLE!**\n\n`;
             responseText += `The requested time slot is free and can be booked immediately.\n`;
             responseText += `You can proceed with creating the calendar event at this time.`;
-          } else {
+            } else {
             responseText += `**❌ REQUESTED TIME HAS CONFLICTS**\n\n`;
             
             if (result.conflictDetails) {
@@ -1140,7 +1196,7 @@ const handler = createMcpHandler(
               responseText += `**💡 SUGGESTED ALTERNATIVE SLOTS** (within business hours 9 AM - 6 PM):\n\n`;
               
               result.availableSlots.forEach((slot, index) => {
-                responseText += `**${index + 1}.** ${slot.startMelbourne} - ${slot.endMelbourne}\n`;
+                responseText += `**${index + 1}.** ${slot.startFormatted} - ${slot.endFormatted}\n`;
               });
               
               responseText += `\n**Next Steps**: Choose one of the suggested time slots above and create a new calendar event with that time.`;
@@ -1149,16 +1205,16 @@ const handler = createMcpHandler(
               responseText += `No available slots found within business hours (9 AM - 6 PM Melbourne time).\n`;
               responseText += `Please try a different date or time range.`;
             }
-          }
+            }
 
-          return {
-            content: [
-              {
-                type: "text",
-                text: responseText,
-              },
-            ],
-          };
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: responseText,
+                },
+              ],
+            };
         } catch (error) {
           console.error("Error in FindAvailableSlots:", error);
           return {

@@ -79,7 +79,7 @@ function convertToWindowsTimezone(ianaTimezone: string): string {
 /**
  * Get calendar connection for a client from database
  */
-export async function getCalendarConnection(clientId: number): Promise<GraphCalendarConnection | null> {
+export async function getCalendarConnection(): Promise<GraphCalendarConnection | null> {
   try {
     return null
   } catch (error) {
@@ -479,10 +479,28 @@ export async function deleteGraphEvent(
     
     
     if (!response.ok) {
-      const error: GraphErrorResponse = await response.json()
+      let errorMessage = `HTTP ${response.status}: ${response.statusText}`
+      
+      try {
+        const error: GraphErrorResponse = await response.json()
+        errorMessage = error.error.message || errorMessage
+        
+        // Handle specific Microsoft Graph error cases
+        if (response.status === 404) {
+          errorMessage = 'Event not found. It may have already been deleted or the event ID is invalid.'
+        } else if (response.status === 403) {
+          errorMessage = 'Permission denied. You may not have permission to delete this event.'
+        } else if (response.status === 429) {
+          errorMessage = 'Too many requests. Please try again in a few moments.'
+        }
+      } catch (parseError) {
+        console.warn('Failed to parse error response:', parseError)
+        // Use the default HTTP error message
+      }
+      
       return {
         success: false,
-        error: error.error.message,
+        error: errorMessage,
       }
     }
 
@@ -724,7 +742,7 @@ export function formatGraphEventsAsString(events: GraphEvent[]): string {
       }
     }
     
-    output += `🆔 ${event.id.substring(0, 8)}...\n\n`
+    output += `🆔 ${event.id}\n\n`
   })
 
   return output.trim()

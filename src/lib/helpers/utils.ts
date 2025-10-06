@@ -5,37 +5,26 @@ import { BASE_SUPABASE_FUNCTIONS_URL } from "./constants";
 import { google } from "googleapis";
 import { Client } from "@microsoft/microsoft-graph-client";
 
-export const getCustomerWithFuzzySearch = async (name: string, clientId?: number) => {
+export const getCustomerWithFuzzySearch = async (
+  name: string,
+  clientId: string
+) => {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
-  
-  let query = supabase
-    .schema("lead_dialer")
-    .from("customers")
-    .select("id, full_name, first_name, last_name, email, phone_number, company, job_title, client_id")
-    .eq("is_active", true);
 
-  // Filter by client_id if provided
-  if (clientId) {
-    query = query.eq("client_id", clientId);
-  }
-
-  const { data: customers, error } = await query;
-
-  if (!customers || customers.length === 0) {
-    console.log(`DEBUG: No customers found in database with the given criteria`);
-    return [];
-  }
+  // TODO: replace created_by with client_id
+  const { data: customers } = await supabase
+    .from("customer_pipeline_items_with_customers")
+    .select("id, full_name, phone_number, email, pipeline_stage_id, company")
+    .eq("created_by", clientId);
 
   const fuse = new Fuse(customers || [], {
-    keys: ["full_name", "first_name", "last_name"], // fields to search
-    threshold: 0.4, // how fuzzy (0 = exact, 1 = very fuzzy)
+    keys: ["full_name"], // fields to search
+    threshold: 0.5, // how fuzzy (0 = exact, 1 = very fuzzy)
   });
-  
-  const results = fuse.search(name);
-  return results;
+  return fuse.search(name);
 };
 
 export const getAgentWithFuzzySearch = async (name: string) => {
@@ -61,7 +50,6 @@ export const getAvailableAgent = async (clientId: string) => {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
-  
 
   const { data: agents } = await supabase
     .schema("lead_dialer")
@@ -78,15 +66,14 @@ export const getAvailableAgent = async (clientId: string) => {
 
 export const initiateCall = async (
   phone_number: string,
-  message: string,
   agent: { id: string; name: string },
-  client_id: string
+  client_id: string,
+  script?: string
 ) => {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
-  
   const { data: vapiIntegration } = await supabase
     .schema("lead_dialer")
     .from("vapi_integration")
@@ -97,7 +84,7 @@ export const initiateCall = async (
   const phoneCallPayload = {
     assistant: {
       name: agent.name,
-      firstMessage: message,
+      firstMessage: `Hi this is ${agent.name} do you have a moment?`,
       firstMessageMode:
         vapiIntegration?.firstMessageMode || "assistant-speaks-first",
       backgroundSound: vapiIntegration?.backgroundSound || "office",
@@ -125,13 +112,14 @@ export const initiateCall = async (
       model: {
         provider:
           vapiIntegration?.model_configurations?.providers?.name || "openai",
-        model: vapiIntegration?.model_configurations?.model || "gpt-4",
+        model: vapiIntegration?.model_configurations?.model || "gpt-4.1",
         temperature: vapiIntegration?.temperature || 0.2,
         maxTokens: vapiIntegration?.maxToken || 250,
         messages: [
           {
             role: "system",
-            content: "You are just relaying a message to a customer.",
+            // content: "You are just relaying a message to a customer.",
+            content: script,
           },
         ],
         // tools and toolIds belong in model object
@@ -150,9 +138,9 @@ export const initiateCall = async (
         numWords: 2,
       },
       // Add missing vapi_integration fields at assistant level
-      ...(vapiIntegration?.voicemailDetection && {
-        voicemailDetection: vapiIntegration.voicemailDetection,
-      }),
+      // ...(vapiIntegration?.voicemailDetection && {
+      //   voicemailDetection: vapiIntegration.voicemailDetection,
+      // }),
       ...(vapiIntegration?.messagePlan && {
         messagePlan: vapiIntegration.messagePlan,
       }),
@@ -163,6 +151,8 @@ export const initiateCall = async (
       ...(vapiIntegration?.serverMessages && {
         serverMessages: vapiIntegration.serverMessages,
       }),
+      serverUrl:
+        "https://weiqhneguxfutfdaxsil.supabase.co/functions/v1/outbound-agent-webhook-receiver",
     },
     type: "outboundPhoneCall",
     phoneNumberId: vapiIntegration?.phoneNumberId,
@@ -170,9 +160,12 @@ export const initiateCall = async (
     customer: {
       number: phone_number,
     },
+    metadata: {
+      client_id,
+    },
   };
-  // console.log("phoneCallPayload", phoneCallPayload);
-  console.log("vapiIntegration", vapiIntegration);
+  // console.log("vapiIntegration", vapiIntegration);
+  console.log("phoneCallPayload", JSON.stringify(phoneCallPayload));
   await axios.post("https://api.vapi.ai/call/phone", phoneCallPayload, {
     headers: {
       "Content-Type": "application/json",
@@ -180,6 +173,7 @@ export const initiateCall = async (
     },
   });
 };
+
 
 export const getCustomerPipeLineWithFuzzySearch = async (fullName: string) => {
   const supabase = createClient(
@@ -528,7 +522,7 @@ export const getAgentByCalendarConnection = async (calendarConnectionId: string,
  */
 export const isWithinOfficeHours = (
   dateTime: string,
-  officeHours: any,
+  officeHours: Record<string, { start: string; end: string; enabled: boolean }>,
   timezone: string = 'Australia/Melbourne'
 ): { isWithin: boolean; reason?: string } => {
   if (!officeHours) {
@@ -582,7 +576,7 @@ export const isWithinOfficeHours = (
  */
 export const getOfficeHoursSlots = (
   date: string,
-  officeHours: any,
+  officeHours: Record<string, { start: string; end: string; enabled: boolean }>,
   timezone: string = 'Australia/Melbourne',
   slotDurationMinutes: number = 60
 ): Array<{ start: string; end: string }> => {

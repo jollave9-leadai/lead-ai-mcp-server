@@ -37,7 +37,7 @@ async function findAvailableSlots(
   timeZone: string,
   durationMinutes: number = 60,
   maxSuggestions: number = 3,
-  officeHours?: any,
+  officeHours?: Record<string, { start: string; end: string; enabled: boolean }> | null,
   agentTimezone?: string
 ): Promise<{
   hasConflict: boolean
@@ -534,11 +534,25 @@ export async function createCalendarEventForClient(
     const { getAgentByCalendarConnection } = await import('../utils')
     const agentAssignment = await getAgentByCalendarConnection(connection.id, clientId)
     
-    let agentOfficeHours = null
+    let agentOfficeHours: Record<string, { start: string; end: string; enabled: boolean }> | null = null
     let agentTimezone = clientTimezone
     
-    if (agentAssignment && agentAssignment.agents && (agentAssignment.agents as any).profiles) {
-      const agent = agentAssignment.agents as any
+    if (agentAssignment && agentAssignment.agents) {
+      const agent = agentAssignment.agents as unknown as {
+        id: number;
+        name: string;
+        profiles: {
+          id: number;
+          name: string;
+          office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+          timezone: string;
+        } | {
+          id: number;
+          name: string;
+          office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+          timezone: string;
+        }[];
+      };
       const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles
       agentOfficeHours = profile.office_hours
       agentTimezone = profile.timezone || clientTimezone
@@ -834,6 +848,16 @@ export async function deleteCalendarEventForClient(
       }
     }
 
+    // Invalidate cache after successful deletion
+    try {
+      const { AdvancedCacheService } = await import('../cache/advancedCacheService')
+      await AdvancedCacheService.invalidateConnection(connection.id)
+      console.log(`🗑️ Cache invalidated for connection ${connection.id} after event deletion`)
+    } catch (cacheError) {
+      console.warn('Failed to invalidate cache after event deletion:', cacheError)
+      // Don't fail the deletion if cache invalidation fails
+    }
+
     return {
       success: true,
     }
@@ -1058,11 +1082,25 @@ export async function findAvailableSlotsForClient(
     const { getAgentByCalendarConnection } = await import('../utils')
     const agentAssignment = await getAgentByCalendarConnection(connection.id, clientId)
     
-    let agentOfficeHours = null
+    let agentOfficeHours: Record<string, { start: string; end: string; enabled: boolean }> | null = null
     let agentTimezone = clientTimezone
     
-    if (agentAssignment && agentAssignment.agents && (agentAssignment.agents as any).profiles) {
-      const agent = agentAssignment.agents as any
+    if (agentAssignment && agentAssignment.agents) {
+      const agent = agentAssignment.agents as unknown as {
+        id: number;
+        name: string;
+        profiles: {
+          id: number;
+          name: string;
+          office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+          timezone: string;
+        } | {
+          id: number;
+          name: string;
+          office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+          timezone: string;
+        }[];
+      };
       const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles
       agentOfficeHours = profile.office_hours
       agentTimezone = profile.timezone || clientTimezone
