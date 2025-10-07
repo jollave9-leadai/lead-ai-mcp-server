@@ -158,18 +158,6 @@ export class ErrorClassifier {
       userMessage: 'An unexpected error occurred. Please try again or contact support.'
     }
   }
-
-  static isRetryable(error: Error | string): boolean {
-    return this.classify(error).isRetryable
-  }
-
-  static getSeverity(error: Error | string): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
-    return this.classify(error).severity
-  }
-
-  static getUserMessage(error: Error | string): string {
-    return this.classify(error).userMessage
-  }
 }
 
 /**
@@ -378,11 +366,6 @@ export class EnhancedErrorHandler {
    */
   private static alertOnCriticalError(errorKey: string, logData: Record<string, unknown>): void {
     console.error(`🚨 CRITICAL ERROR ALERT: ${errorKey}`, logData)
-    
-    // In production, integrate with monitoring services:
-    // - Send to Sentry, DataDog, etc.
-    // - Trigger PagerDuty alerts
-    // - Send Slack notifications
   }
 
   /**
@@ -398,120 +381,8 @@ export class EnhancedErrorHandler {
     })
   }
 
-  /**
-   * Get basic error statistics (for maintenance)
-   */
-  static getErrorStats(): {
-    totalErrors: number
-    errorsByType: Record<string, number>
-  } {
-    const totalErrors = Array.from(this.errorCounts.values())
-      .reduce((sum, count) => sum + count, 0)
-
-    const errorsByType: Record<string, number> = {}
-    for (const [key, count] of this.errorCounts) {
-      const type = key.split(':')[1] || 'UNKNOWN'
-      errorsByType[type] = (errorsByType[type] || 0) + count
-    }
-
-    return {
-      totalErrors,
-      errorsByType
-    }
-  }
-
   private static sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms))
-  }
-}
-
-/**
- * Circuit breaker with enhanced monitoring
- */
-export class EnhancedCircuitBreaker {
-  private failures = 0
-  private lastFailureTime = 0
-  private state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED'
-  private successCount = 0
-
-  constructor(
-    private readonly failureThreshold: number = 5,
-    private readonly resetTimeoutMs: number = 60000,
-    private readonly successThreshold: number = 3
-  ) {}
-
-  async execute<T>(operation: () => Promise<T>): Promise<T> {
-    const now = Date.now()
-
-    // Check if we should transition from OPEN to HALF_OPEN
-    if (this.state === 'OPEN' && now - this.lastFailureTime > this.resetTimeoutMs) {
-      this.state = 'HALF_OPEN'
-      this.successCount = 0
-      console.log('🔄 Circuit breaker: OPEN → HALF_OPEN')
-    }
-
-    // Reject immediately if circuit is open
-    if (this.state === 'OPEN') {
-      throw new Error(`Circuit breaker is OPEN. Service unavailable until ${new Date(this.lastFailureTime + this.resetTimeoutMs).toISOString()}`)
-    }
-
-    try {
-      const result = await operation()
-
-      // Handle success
-      if (this.state === 'HALF_OPEN') {
-        this.successCount++
-        if (this.successCount >= this.successThreshold) {
-          this.state = 'CLOSED'
-          this.failures = 0
-          console.log('✅ Circuit breaker: HALF_OPEN → CLOSED (service recovered)')
-        }
-      } else if (this.state === 'CLOSED') {
-        this.failures = 0 // Reset failure count on success
-      }
-
-      return result
-    } catch (error) {
-      // Handle failure
-      this.failures++
-      this.lastFailureTime = now
-
-      if (this.state === 'HALF_OPEN') {
-        // Immediate transition back to OPEN on any failure in HALF_OPEN
-        this.state = 'OPEN'
-        console.log('❌ Circuit breaker: HALF_OPEN → OPEN (failure during recovery)')
-      } else if (this.failures >= this.failureThreshold) {
-        this.state = 'OPEN'
-        console.log(`❌ Circuit breaker: CLOSED → OPEN (${this.failures} failures)`)
-      }
-
-      throw error
-    }
-  }
-
-  getState(): {
-    state: 'CLOSED' | 'OPEN' | 'HALF_OPEN'
-    failures: number
-    successCount: number
-    timeUntilRetry?: number
-  } {
-    const timeUntilRetry = this.state === 'OPEN' 
-      ? Math.max(0, this.resetTimeoutMs - (Date.now() - this.lastFailureTime))
-      : undefined
-
-    return {
-      state: this.state,
-      failures: this.failures,
-      successCount: this.successCount,
-      timeUntilRetry
-    }
-  }
-
-  reset(): void {
-    this.state = 'CLOSED'
-    this.failures = 0
-    this.successCount = 0
-    this.lastFailureTime = 0
   }
 }
 

@@ -18,13 +18,6 @@ interface BatchRequest {
   body?: unknown
 }
 
-// interface BatchResponse {
-//   id: string
-//   status: number
-//   headers?: Record<string, string>
-//   body?: unknown
-// }
-
 interface RequestMetrics {
   operation: string
   startTime: number
@@ -225,15 +218,11 @@ export class EnhancedGraphApiService {
     
     if (!response.ok) {
       const errorText = await response.text()
-      console.error(`❌ Enhanced Graph API Error: ${response.status} ${response.statusText}`)
-      
       throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`)
     }
 
     const data = await response.json()
     const events: GraphEvent[] = data.value || []
-
-    console.log(`📊 Enhanced Graph response: ${events.length} events, ${requestDuration}ms`)
 
     return {
       success: true,
@@ -309,13 +298,6 @@ export class EnhancedGraphApiService {
       ? '/me/events' 
       : `/me/calendars/${calendarId}/events`
 
-    console.log(`📧 ENHANCED: Creating event - Microsoft Graph will automatically send invitations to attendees`)
-    console.log(`📧 ENHANCED: Event data:`, JSON.stringify(eventData, null, 2))
-    
-    if (eventData.isOnlineMeeting) {
-      console.log(`💻 ENHANCED: Teams meeting requested with provider: ${eventData.onlineMeetingProvider}`)
-    }
-
     const requestStart = Date.now()
     const response = await makeGraphRequest(connection, endpoint, {
       method: 'POST',
@@ -332,17 +314,6 @@ export class EnhancedGraphApiService {
     }
 
     const event: GraphEvent = await response.json()
-    
-    // Log Teams meeting details if present
-    if (event.onlineMeeting) {
-      console.log(`✅ ENHANCED: Teams meeting created successfully:`)
-      console.log(`   Join URL: ${event.onlineMeeting.joinUrl || 'Not available'}`)
-      console.log(`   Conference ID: ${event.onlineMeeting.conferenceId || 'Not available'}`)
-    } else if (eventData.isOnlineMeeting) {
-      console.log(`⚠️ ENHANCED: Teams meeting was requested but not created in the response`)
-      console.log(`   Event response keys:`, Object.keys(event))
-    }
-
     return {
       success: true,
       event

@@ -697,6 +697,271 @@ const handler = createMcpHandler(
         }
       }
     );
+    //BulkDeleteCalendarEvents
+    server.tool(
+      "BulkDeleteCalendarEvents",
+      "Cancel multiple calendar appointments based on criteria (date, time range, or search terms)",
+      {
+        clientId: z
+          .union([z.number(), z.string().transform(Number)])
+          .describe("Client ID number (e.g., 10000001)"),
+        dateRequest: z
+          .string()
+          .optional()
+          .describe("Natural language date: 'today', 'tomorrow', 'this week', 'next monday' (optional)"),
+        startDate: z
+          .string()
+          .optional()
+          .describe("Start date: '2025-10-06T09:00:00' (use instead of dateRequest for specific dates)"),
+        endDate: z
+          .string()
+          .optional()
+          .describe("End date: '2025-10-06T17:00:00' (use with startDate for date range)"),
+        searchQuery: z
+          .string()
+          .optional()
+          .describe("Search text to match in event titles: 'Meeting with' or 'Jonathan' (optional)"),
+        confirmDeletion: z
+          .boolean()
+          .default(false)
+          .describe("Confirm bulk deletion: true to proceed, false to preview only (default: false)"),
+        calendarId: z
+          .string()
+          .optional()
+          .describe("Calendar ID (optional, uses primary calendar if not specified)"),
+      },
+      async (input) => {
+        const { clientId, dateRequest, startDate, endDate, searchQuery, confirmDeletion, calendarId } = input;
+
+        console.log("bulk delete calendar events (Microsoft Graph)");
+        console.table(input);
+
+        const numericClientId =
+          typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+
+        if (!numericClientId || isNaN(numericClientId)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Error: clientId is required and must be a valid number",
+              },
+            ],
+          };
+        }
+
+        try {
+          // First, get events based on criteria
+          let eventsToDelete: Array<{
+            id: string
+            subject?: string
+            start?: { dateTime?: string } | string
+            end?: { dateTime?: string } | string
+            location?: { displayName?: string }
+            attendees?: Array<{ emailAddress?: { name?: string; address?: string } }>
+            organizer?: { emailAddress?: { name?: string; address?: string } }
+            body?: { content?: string }
+          }> = [];
+
+          if (dateRequest || (startDate && endDate)) {
+            // Get events by date range
+            const getEventsRequest = {
+              clientId: numericClientId,
+              dateRequest,
+              startDate,
+              endDate,
+              calendarId
+            };
+
+            const eventsResult = await FinalOptimizedCalendarOperations.getCalendarEventsForClient(
+              numericClientId, 
+              getEventsRequest
+            );
+
+            if (eventsResult.success && eventsResult.events) {
+              eventsToDelete = eventsResult.events;
+            }
+          }
+
+          // Filter by search query if provided
+          if (searchQuery && eventsToDelete.length > 0) {
+            const searchLower = searchQuery.toLowerCase();
+            eventsToDelete = eventsToDelete.filter(event => 
+              event.subject?.toLowerCase().includes(searchLower) ||
+              event.body?.content?.toLowerCase().includes(searchLower) ||
+              event.location?.displayName?.toLowerCase().includes(searchLower)
+            );
+          } else if (searchQuery && eventsToDelete.length === 0) {
+            // If only search query provided, search all events
+            const searchResult = await FinalOptimizedCalendarOperations.searchCalendarEventsForClient(
+              numericClientId,
+              searchQuery,
+              { calendarId }
+            );
+
+            if (searchResult.success && searchResult.events) {
+              eventsToDelete = searchResult.events;
+            }
+          }
+
+          if (eventsToDelete.length === 0) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `**No Events Found**\n\nNo appointments found matching your criteria:\n${dateRequest ? `- Date: ${dateRequest}\n` : ''}${startDate && endDate ? `- Date Range: ${startDate} to ${endDate}\n` : ''}${searchQuery ? `- Search: "${searchQuery}"\n` : ''}`,
+                },
+              ],
+            };
+          }
+
+          // Preview mode (default)
+          if (!confirmDeletion) {
+            let previewText = `**📋 Bulk Deletion Preview**\n\n`;
+            previewText += `Found **${eventsToDelete.length}** appointment(s) to cancel:\n\n`;
+
+            eventsToDelete.forEach((event, index) => {
+              const startTime = new Date(
+                typeof event.start === 'string' ? event.start : event.start?.dateTime || ''
+              ).toLocaleString("en-US");
+              const endTime = new Date(
+                typeof event.end === 'string' ? event.end : event.end?.dateTime || ''
+              ).toLocaleString("en-US");
+              
+              previewText += `**${index + 1}. ${event.subject || 'Untitled Event'}**\n`;
+              previewText += `   📅 ${startTime} - ${endTime}\n`;
+              if (event.location?.displayName) {
+                previewText += `   📍 ${event.location.displayName}\n`;
+              }
+              if (event.attendees && event.attendees.length > 1) {
+                const attendeeNames = event.attendees
+                  .filter((a) => a.emailAddress?.name !== event.organizer?.emailAddress?.name)
+                  .map((a) => a.emailAddress?.name || a.emailAddress?.address)
+                  .join(', ');
+                if (attendeeNames) {
+                  previewText += `   👥 ${attendeeNames}\n`;
+                }
+              }
+              previewText += `   🆔 ID: \`${event.id}\`\n\n`;
+            });
+
+            previewText += `⚠️ **To proceed with cancellation, set \`confirmDeletion: true\`**\n`;
+            previewText += `This will permanently cancel all ${eventsToDelete.length} appointment(s) and notify attendees.`;
+
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: previewText,
+                },
+              ],
+            };
+          }
+
+          // Confirmation mode - actually delete the events
+          let successCount = 0;
+          let failureCount = 0;
+          const results: Array<{
+            event: {
+              id: string
+              subject?: string
+              start?: { dateTime?: string } | string
+              end?: { dateTime?: string } | string
+            }
+            success: boolean
+            error?: string
+          }> = [];
+
+          for (const event of eventsToDelete) {
+            try {
+              const deleteResult = await FinalOptimizedCalendarOperations.deleteCalendarEventForClient(
+                numericClientId, 
+                event.id, 
+                calendarId
+              );
+
+              results.push({
+                event,
+                success: deleteResult.success,
+                error: deleteResult.error
+              });
+
+              if (deleteResult.success) {
+                successCount++;
+              } else {
+                failureCount++;
+              }
+
+              // Add small delay between deletions to avoid rate limiting
+              await new Promise(resolve => setTimeout(resolve, 100));
+            } catch (error) {
+              failureCount++;
+              results.push({
+                event,
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error'
+              });
+            }
+          }
+
+          // Generate results summary
+          let resultText = `**✅ Bulk Cancellation Complete**\n\n`;
+          resultText += `**Summary:**\n`;
+          resultText += `- ✅ Successfully canceled: ${successCount}\n`;
+          resultText += `- ❌ Failed to cancel: ${failureCount}\n`;
+          resultText += `- 📊 Total processed: ${eventsToDelete.length}\n\n`;
+
+          if (successCount > 0) {
+            resultText += `**✅ Successfully Canceled (${successCount}):**\n`;
+            results
+              .filter(r => r.success)
+              .forEach((result, index) => {
+                const startTime = new Date(
+                  typeof result.event.start === 'string' ? result.event.start : result.event.start?.dateTime || ''
+                ).toLocaleString("en-US");
+                resultText += `${index + 1}. ${result.event.subject || 'Untitled'} - ${startTime}\n`;
+              });
+            resultText += `\n`;
+          }
+
+          if (failureCount > 0) {
+            resultText += `**❌ Failed to Cancel (${failureCount}):**\n`;
+            results
+              .filter(r => !r.success)
+              .forEach((result, index) => {
+                const startTime = new Date(
+                  typeof result.event.start === 'string' ? result.event.start : result.event.start?.dateTime || ''
+                ).toLocaleString("en-US");
+                resultText += `${index + 1}. ${result.event.subject || 'Untitled'} - ${startTime}\n`;
+                resultText += `   Error: ${result.error}\n`;
+              });
+          }
+
+          resultText += `\n📧 Attendees have been automatically notified of the cancellations.`;
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: resultText,
+              },
+            ],
+          };
+
+        } catch (error) {
+          console.error("Error in bulk delete calendar events:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `**Bulk Deletion Failed**\n\n**Error**: ${error instanceof Error ? error.message : 'Unknown error occurred'}\n\n**Client ID**: ${numericClientId}`,
+              },
+            ],
+          };
+        }
+      }
+    );
+
     //SearchCalendarEvents
     server.tool(
       "SearchCalendarEvents",
