@@ -360,10 +360,7 @@ const createEmailRaw = (
 };
 
 // Helper: refresh token for email
-const handleRefreshToken = async (
-  refreshToken: string,
-  provider: string,
-) => {
+const handleRefreshToken = async (refreshToken: string, provider: string) => {
   let newAccessToken = null;
   let newRefreshToken = null;
   let newExpiresAt = null;
@@ -386,9 +383,8 @@ const handleRefreshToken = async (
     );
     newAccessToken = response.data.access_token;
     newRefreshToken = response.data.refresh_token;
-    newExpiresAt = new Date(
-      Date.now() + response.data.expires_in * 1000
-    ).toISOString();
+    const now = Math.floor(Date.now() / 1000);
+    newExpiresAt = now + response.data.expiresIn;
   } else {
     const response = await axios.post(
       "https://oauth2.googleapis.com/token",
@@ -406,9 +402,8 @@ const handleRefreshToken = async (
     );
     newAccessToken = response.data.access_token;
     newRefreshToken = response.data.refresh_token;
-    newExpiresAt = new Date(
-      Date.now() + response.data.expires_in * 1000
-    ).toISOString();
+    const now = Math.floor(Date.now() / 1000);
+    newExpiresAt = now + response.data.expiresIn;
   }
 
   return {
@@ -511,16 +506,17 @@ export const sendEmail = async (
     if (Date.now() >= expiresAt) {
       const refreshedToken = await handleRefreshToken(
         refreshToken,
-        emailData.provider,
+        emailData.provider
       );
       if (refreshedToken) {
         // Store the refreshed token in the database
+        const now = Math.floor(Date.now() / 1000);
         await supabase
           .from("emails")
           .update({
             access_token: refreshedToken.access_token,
             refresh_token: refreshedToken.refresh_token,
-            expires_at: refreshedToken.expires_at,
+            expires_at: now + refreshedToken.expires_at,
           })
           .eq("email", emailData.email)
           .eq("client_id", client_id);
@@ -529,11 +525,7 @@ export const sendEmail = async (
       }
     }
     if (emailData?.provider === "azure-ad") {
-      const response = await sendOutlookMail(
-        accessToken,
-        email,
-        emailBody
-      );
+      const response = await sendOutlookMail(accessToken, email, emailBody);
       console.log("Outlook Email response:", response);
       return response;
     } else {
