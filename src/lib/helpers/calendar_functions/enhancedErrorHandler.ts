@@ -128,7 +128,7 @@ export class ErrorClassifier {
     }
   ]
 
-  static classify(error: Error | string, _context?: ErrorContext): ErrorClassification {
+  static classify(error: Error | string): ErrorClassification {
     const errorMessage = error instanceof Error ? error.message : error
     const errorStack = error instanceof Error ? error.stack : undefined
 
@@ -213,7 +213,7 @@ export class EnhancedErrorHandler {
         attempt++
 
         // Classify the error
-        const classification = ErrorClassifier.classify(lastError, context)
+        const classification = ErrorClassifier.classify(lastError)
         
         // Log error with context
         this.logError(lastError, context, classification, attempt)

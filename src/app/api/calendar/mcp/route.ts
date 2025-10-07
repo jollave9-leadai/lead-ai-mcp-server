@@ -1,10 +1,6 @@
 import { z } from "zod";
 import { createMcpHandler } from "mcp-handler";
-import {
-  updateCalendarEventForClient,
-  getCalendarsForClient,
-  checkClientCalendarConnection,
-} from "@/lib/helpers/calendar_functions";
+// All calendar operations now use FinalOptimizedCalendarOperations
 import { FinalOptimizedCalendarOperations } from "@/lib/helpers/calendar_functions/finalOptimizedCalendarOperations";
 import { AdvancedCacheService } from "@/lib/helpers/cache/advancedCacheService";
 import {
@@ -159,7 +155,8 @@ const handler = createMcpHandler(
         isOnlineMeeting: z
           .boolean()
           .optional()
-          .describe("Create Teams meeting: true/false (default: false)"),
+          .default(true)
+          .describe("Create Teams meeting: true/false (default: true)"),
         calendarId: z
           .string()
           .optional()
@@ -183,6 +180,7 @@ const handler = createMcpHandler(
           
           console.log("create calendar event (Microsoft Graph)");
           console.table(input);
+          console.log(`🔍 DEBUG MCP: isOnlineMeeting parameter = ${isOnlineMeeting}`);
           
           // Convert and validate clientId
           const numericClientId =
@@ -369,6 +367,8 @@ const handler = createMcpHandler(
             calendarId,
           };
 
+          console.log(`🔍 DEBUG MCP: Request object being passed:`, JSON.stringify(request, null, 2));
+
           const result = await FinalOptimizedCalendarOperations.createCalendarEventForClient(numericClientId, request);
 
           if (!result.success) {
@@ -411,7 +411,7 @@ const handler = createMcpHandler(
           }
 
           if (result.event?.onlineMeeting?.joinUrl) {
-            responseText += `💻 Teams Meeting Available\n`;
+            responseText += `💻 Teams Meeting: ${result.event.onlineMeeting.joinUrl}\n`;
           }
           
           responseText += `\n🆔 ${result.eventId}`;
@@ -570,7 +570,7 @@ const handler = createMcpHandler(
             calendarId,
           };
 
-          const result = await updateCalendarEventForClient(numericClientId, eventId, updates);
+          const result = await FinalOptimizedCalendarOperations.updateCalendarEventForClient(numericClientId, eventId, updates);
 
           if (!result.success) {
             return {
@@ -829,7 +829,7 @@ const handler = createMcpHandler(
             };
           }
 
-          const result = await getCalendarsForClient(numericClientId);
+          const result = await FinalOptimizedCalendarOperations.getCalendarsForClient(numericClientId);
 
           if (!result.success) {
             return {
@@ -852,16 +852,10 @@ const handler = createMcpHandler(
             result.calendars.forEach((calendar, index) => {
               responseText += `**${index + 1}. ${calendar.name}**\n`;
               responseText += `- **ID**: \`${calendar.id}\`\n`;
-              responseText += `- **Default**: ${calendar.isDefaultCalendar ? "✅ Yes" : "❌ No"}\n`;
+              responseText += `- **Default**: ${calendar.isDefault ? "✅ Yes" : "❌ No"}\n`;
               responseText += `- **Can Edit**: ${calendar.canEdit ? "✅ Yes" : "❌ No"}\n`;
               
-              if (calendar.owner) {
-                responseText += `   - **Owner**: ${calendar.owner.name || calendar.owner.address}\n`;
-              }
-              
-              if (calendar.color) {
-                responseText += `   - **Color**: ${calendar.color}\n`;
-              }
+              responseText += `- **Owner**: ${calendar.owner}\n`;
               
               responseText += `\n`;
             });
@@ -921,7 +915,7 @@ const handler = createMcpHandler(
             };
           }
 
-          const summary = await checkClientCalendarConnection(numericClientId);
+          const summary = await FinalOptimizedCalendarOperations.checkClientCalendarConnection(numericClientId);
 
           if (!summary) {
             return {
@@ -936,28 +930,30 @@ const handler = createMcpHandler(
 
           let responseText = `**Calendar Connection Status for Client ${numericClientId}**\n\n`;
 
-          if (summary.has_active_connections) {
-            responseText += `**Status**: Connected\n`;
-            responseText += `**Total Connections**: ${summary.total_connections}\n`;
-            responseText += `**Active Connections**: ${summary.connected_connections}\n`;
-
-            if (summary.microsoft_connections > 0) {
-              responseText += `**Microsoft Connections**: ${summary.microsoft_connections}\n`;
+          if (summary.connected) {
+            responseText += `**Status**: ✅ Connected\n`;
+            
+            if (summary.connectionDetails) {
+              const details = summary.connectionDetails;
+              responseText += `**User Email**: ${details.userEmail}\n`;
+              responseText += `**User Name**: ${details.userName}\n`;
+              responseText += `**Connected At**: ${new Date(details.connectedAt).toLocaleDateString()}\n`;
+              
+              if (details.lastSync) {
+                responseText += `**Last Sync**: ${new Date(details.lastSync).toLocaleDateString()}\n`;
+              }
+              
+              if (details.calendarsCount !== undefined) {
+                responseText += `**Available Calendars**: ${details.calendarsCount}\n`;
+              }
             }
-
-            if (summary.google_connections > 0) {
-              responseText += `**Google Connections**: ${summary.google_connections}\n`;
-            }
-
-            if (summary.primary_connection) {
-              responseText += `**Primary Connection**: ${summary.primary_connection.display_name} (${summary.primary_connection.email}) - ${summary.primary_connection.provider_name}\n`;
-            }
-
+            
             responseText += `\nThis client can access calendar events through Microsoft Graph.`;
           } else {
-            responseText += `**Status**: No Active Connections\n`;
-            responseText += `**Total Connections**: ${summary.total_connections}\n`;
-            responseText += `**Active Connections**: ${summary.connected_connections}\n`;
+            responseText += `**Status**: ❌ Not connected\n`;
+            if (summary.error) {
+              responseText += `**Error**: ${summary.error}\n`;
+            }
             responseText += `\nThis client needs to connect their Microsoft calendar before accessing events.`;
           }
 
@@ -1044,8 +1040,7 @@ const handler = createMcpHandler(
           };
 
           // Use legacy function for availability (not yet optimized)
-          const { getAvailabilityForClient } = await import("@/lib/helpers/calendar_functions");
-          const result = await getAvailabilityForClient(numericClientId, request);
+          const result = await FinalOptimizedCalendarOperations.getAvailabilityForClient(numericClientId, request);
 
           if (!result.success) {
             return {
@@ -1061,18 +1056,18 @@ const handler = createMcpHandler(
           let responseText = `**Availability Information for Client ${numericClientId}**\n\n`;
           responseText += `**Date Range**: ${new Date(startDate).toLocaleDateString("en-US")} - ${new Date(endDate).toLocaleDateString("en-US")}\n\n`;
 
-          if (!result.availability || Object.keys(result.availability).length === 0) {
+          if (!result.availability || result.availability.length === 0) {
             responseText += `**No busy times found** - All requested time slots appear to be available.`;
           } else {
             responseText += `**Busy Times Found:**\n\n`;
 
-            Object.entries(result.availability).forEach(([email, slots]) => {
-              responseText += `**👤 ${email}:**\n`;
+            result.availability.forEach((person) => {
+              responseText += `**👤 ${person.email}:**\n`;
               
-              if (slots.length === 0) {
+              if (person.availability.length === 0) {
                 responseText += ` No busy times - Available for the entire period\n`;
-          } else {
-                slots.forEach((slot, index) => {
+              } else {
+                person.availability.forEach((slot, index) => {
                   const startTime = new Date(slot.start).toLocaleString("en-US");
                   const endTime = new Date(slot.end).toLocaleString("en-US");
                   responseText += `   ${index + 1}. **${slot.status.toUpperCase()}**: ${startTime} - ${endTime}\n`;

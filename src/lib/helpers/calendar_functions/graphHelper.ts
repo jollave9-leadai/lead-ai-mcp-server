@@ -382,6 +382,10 @@ export async function createGraphEvent(
     console.log(`📧 Creating event - Microsoft Graph will automatically send invitations to attendees`)
     console.log(`📧 Event data:`, JSON.stringify(eventData, null, 2))
     
+    if (eventData.isOnlineMeeting) {
+      console.log(`💻 Teams meeting requested with provider: ${eventData.onlineMeetingProvider}`)
+    }
+    
     const response = await makeGraphRequest(connection, endpoint, {
       method: 'POST',
       body: JSON.stringify(eventData),
@@ -397,6 +401,16 @@ export async function createGraphEvent(
     }
 
     const event: GraphEvent = await response.json()
+    
+    // Log Teams meeting details if present
+    if (event.onlineMeeting) {
+      console.log(`✅ Teams meeting created successfully:`)
+      console.log(`   Join URL: ${event.onlineMeeting.joinUrl || 'Not available'}`)
+      console.log(`   Conference ID: ${event.onlineMeeting.conferenceId || 'Not available'}`)
+    } else if (eventData.isOnlineMeeting) {
+      console.log(`⚠️ Teams meeting was requested but not created in the response`)
+      console.log(`   Event response keys:`, Object.keys(event))
+    }
 
     return {
       success: true,
@@ -727,7 +741,7 @@ export function formatGraphEventsAsString(events: GraphEvent[]): string {
     }
     
     if (event.onlineMeeting?.joinUrl) {
-      output += `💻 Teams Meeting\n`
+      output += `💻 Teams Meeting: ${event.onlineMeeting.joinUrl}\n`
     }
     
     // Show first attendee (excluding organizer)

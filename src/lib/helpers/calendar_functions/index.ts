@@ -1,14 +1,13 @@
-// Core calendar functions
+// Core calendar functions (legacy - use FinalOptimizedCalendarOperations for new code)
 export * from "./getClientTimeZone";
 export * from "./graphHelper";
 export * from "./graphDatabase";
 export * from "./graphCalendar";
 
 // Optimized services
-export * from "./optimizedCalendarOperations";
 export * from "./optimizedConflictDetection";
 
-// Enhanced services (final optimizations)
+// Enhanced services (recommended for all new implementations)
 export * from "./finalOptimizedCalendarOperations";
 export * from "./enhancedGraphApiService";
 export * from "./enhancedErrorHandler";

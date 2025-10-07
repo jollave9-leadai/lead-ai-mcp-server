@@ -664,9 +664,25 @@ export async function createCalendarEventForClient(
       }
     }
 
+    console.log(`🔍 DEBUG: request.isOnlineMeeting = ${request.isOnlineMeeting}`)
+    
     if (request.isOnlineMeeting) {
+      console.log(`💻 TEAMS MEETING REQUESTED - Setting up Teams meeting`)
       eventData.isOnlineMeeting = true
       eventData.onlineMeetingProvider = 'teamsForBusiness'
+      
+      // Add Teams meeting information to the body if not already present
+      const teamsInfo = '\n\n--- Microsoft Teams Meeting ---\nJoin the meeting from your calendar or use the Teams app.\n'
+      if (eventData.body) {
+        eventData.body.content += teamsInfo
+      } else {
+        eventData.body = {
+          contentType: 'html',
+          content: `<p>Meeting details:</p>${teamsInfo.replace(/\n/g, '<br>')}`
+        }
+      }
+    } else {
+      console.log(`📝 REGULAR MEETING - No Teams meeting requested`)
     }
 
     // Create event in Microsoft Graph

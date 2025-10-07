@@ -9,7 +9,6 @@ import type {
 import { AdvancedCacheService } from '../cache/advancedCacheService'
 import { EnhancedGraphApiService } from './enhancedGraphApiService'
 import { OptimizedConflictDetection } from './optimizedConflictDetection'
-import { EnhancedErrorHandler } from './enhancedErrorHandler'
 import { parseGraphDateRequest, formatGraphEventsAsString } from './graphHelper'
 
 /**
@@ -30,8 +29,6 @@ export class FinalOptimizedCalendarOperations {
     error?: string
   }> {
     try {
-      console.log(`🚀 FINAL OPTIMIZED: Getting calendar events for client ${clientId}`)
-      
       // Get all client data with advanced caching
       const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
       if (!clientData) {
@@ -49,8 +46,6 @@ export class FinalOptimizedCalendarOperations {
           error: 'Calendar connection is not active. Please reconnect your Microsoft calendar.'
         }
       }
-
-      console.log(`🌍 Using cached client timezone: ${timezone}`)
 
       // Parse date request if provided
       let startDateTime: string | undefined
@@ -86,8 +81,6 @@ export class FinalOptimizedCalendarOperations {
       const events = eventsResponse.events || []
       const formattedEvents = formatGraphEventsAsString(events)
 
-      console.log(`✅ FINAL OPTIMIZED: Retrieved ${events.length} events for client ${clientId}`)
-
       return {
         success: true,
         events,
@@ -122,8 +115,6 @@ export class FinalOptimizedCalendarOperations {
     }>
   }> {
     try {
-      console.log(`🚀 FINAL OPTIMIZED: Creating calendar event for client ${clientId}`)
-      
       // Get all client data with advanced caching
       const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
       if (!clientData) {
@@ -158,8 +149,6 @@ export class FinalOptimizedCalendarOperations {
       )
 
       if (conflictResult.hasConflict && conflictResult.availableSlots) {
-        console.log(`❌ CONFLICT DETECTED - Suggesting ${conflictResult.availableSlots.length} alternative slots`)
-        
         let errorMessage = `Scheduling conflict detected: ${conflictResult.conflictDetails}`
         
         if (conflictResult.availableSlots.length > 0) {
@@ -182,8 +171,6 @@ export class FinalOptimizedCalendarOperations {
           }))
         }
       }
-
-      console.log(`✅ No conflicts - Proceeding with enhanced event creation`)
 
       // Prepare event data
       const eventData: CreateGraphEventRequest = {
@@ -248,7 +235,18 @@ export class FinalOptimizedCalendarOperations {
       if (request.isOnlineMeeting) {
         eventData.isOnlineMeeting = true
         eventData.onlineMeetingProvider = 'teamsForBusiness'
-      }
+        
+        // Add Teams meeting information to the body if not already present
+        const teamsInfo = '\n\nJoin the meeting from your calendar or use the Teams app.\n'
+        if (eventData.body) {
+          eventData.body.content += teamsInfo
+        } else {
+          eventData.body = {
+            contentType: 'html',
+            content: `<p>Meeting details:</p>${teamsInfo.replace(/\n/g, '<br>')}`
+          }
+        }
+      } 
 
       // Create event using enhanced Graph API service
       const eventResponse = await EnhancedGraphApiService.createEventOptimized(
@@ -263,8 +261,6 @@ export class FinalOptimizedCalendarOperations {
           error: eventResponse.error,
         }
       }
-
-      console.log(`✅ FINAL OPTIMIZED: Created event ${eventResponse.event?.id} for client ${clientId}`)
 
       return {
         success: true,
@@ -462,6 +458,258 @@ export class FinalOptimizedCalendarOperations {
   }
 
   /**
+   * Get calendars for client with enhanced optimization
+   */
+  static async getCalendarsForClient(clientId: number): Promise<{
+    success: boolean
+    calendars?: Array<{
+      id: string
+      name: string
+      isDefault: boolean
+      canEdit: boolean
+      owner: string
+    }>
+    error?: string
+  }> {
+    try {
+      console.log(`🚀 FINAL OPTIMIZED: Getting calendars for client ${clientId}`)
+
+      // Get client data with caching
+      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
+      if (!clientData?.connection) {
+        return { success: false, error: 'Calendar connection not found' }
+      }
+
+      const { connection } = clientData
+
+      // Get calendars using direct Graph API call
+      const response = await fetch('https://graph.microsoft.com/v1.0/me/calendars', {
+        headers: {
+          'Authorization': `Bearer ${connection.access_token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        return { success: false, error: `Failed to fetch calendars: ${response.statusText}` }
+      }
+
+      const data = await response.json()
+      
+      // Transform calendar data
+      const calendars = (data.value as Array<{
+        id: string
+        name: string
+        isDefaultCalendar?: boolean
+        canEdit?: boolean
+        owner?: { name?: string; address?: string }
+      }>)?.map((cal) => ({
+        id: cal.id,
+        name: cal.name,
+        isDefault: cal.isDefaultCalendar || false,
+        canEdit: cal.canEdit !== false,
+        owner: cal.owner?.name || cal.owner?.address || 'Unknown'
+      })) || []
+
+      console.log(`✅ FINAL OPTIMIZED: Retrieved ${calendars.length} calendars for client ${clientId}`)
+      return {
+        success: true,
+        calendars
+      }
+
+    } catch (error) {
+      console.error('Error in final optimized getCalendarsForClient:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred'
+      }
+    }
+  }
+
+  /**
+   * Check client calendar connection with enhanced optimization
+   */
+  static async checkClientCalendarConnection(clientId: number): Promise<{
+    success: boolean
+    connected: boolean
+    connectionDetails?: {
+      userEmail: string
+      userName: string
+      connectedAt: string
+      lastSync?: string
+      calendarsCount?: number
+    }
+    error?: string
+  }> {
+    try {
+      console.log(`🚀 FINAL OPTIMIZED: Checking calendar connection for client ${clientId}`)
+
+      // Get client data with caching
+      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
+      if (!clientData?.connection) {
+        return {
+          success: true,
+          connected: false,
+          error: 'No calendar connection found'
+        }
+      }
+
+      const { connection } = clientData
+
+      // Test connection by making a simple API call
+      const testResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: {
+          'Authorization': `Bearer ${connection.access_token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!testResponse.ok) {
+        return {
+          success: true,
+          connected: false,
+          error: `Connection test failed: ${testResponse.statusText}`
+        }
+      }
+
+      // Get calendars count
+      const calendarsResponse = await fetch('https://graph.microsoft.com/v1.0/me/calendars', {
+        headers: {
+          'Authorization': `Bearer ${connection.access_token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      let calendarsCount = 0
+      if (calendarsResponse.ok) {
+        const calendarsData = await calendarsResponse.json()
+        calendarsCount = calendarsData.value?.length || 0
+      }
+
+      console.log(`✅ FINAL OPTIMIZED: Calendar connection verified for client ${clientId}`)
+      return {
+        success: true,
+        connected: true,
+        connectionDetails: {
+          userEmail: connection.email,
+          userName: connection.display_name || 'Unknown',
+          connectedAt: connection.created_at,
+          lastSync: connection.last_sync_at || undefined,
+          calendarsCount
+        }
+      }
+
+    } catch (error) {
+      console.error('Error in final optimized checkClientCalendarConnection:', error)
+      return {
+        success: false,
+        connected: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred'
+      }
+    }
+  }
+
+  /**
+   * Get availability for client with enhanced optimization
+   */
+  static async getAvailabilityForClient(
+    clientId: number,
+    request: {
+      startDate: string
+      endDate: string
+      emails?: string[]
+      intervalInMinutes?: number
+    }
+  ): Promise<{
+    success: boolean
+    availability?: Array<{
+      email: string
+      availability: Array<{
+        start: string
+        end: string
+        status: 'free' | 'busy' | 'tentative' | 'outOfOffice'
+      }>
+    }>
+    error?: string
+  }> {
+    try {
+      console.log(`🚀 FINAL OPTIMIZED: Getting availability for client ${clientId}`)
+
+      // Get client data with caching
+      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
+      if (!clientData?.connection) {
+        return { success: false, error: 'Calendar connection not found' }
+      }
+
+      const { connection } = clientData
+      const clientTimezone = await AdvancedCacheService.getClientTimezone(clientId)
+
+      // Use organizer email if no emails specified
+      const emailsToCheck = request.emails || [connection.email]
+      const intervalMinutes = request.intervalInMinutes || 60
+
+      // Get free/busy information using direct Graph API
+      const freeBusyResponse = await fetch('https://graph.microsoft.com/v1.0/me/calendar/getSchedule', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${connection.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          schedules: emailsToCheck,
+          startTime: {
+            dateTime: request.startDate,
+            timeZone: clientTimezone || 'UTC'
+          },
+          endTime: {
+            dateTime: request.endDate,
+            timeZone: clientTimezone || 'UTC'
+          },
+          availabilityViewInterval: intervalMinutes
+        })
+      })
+
+      if (!freeBusyResponse.ok) {
+        return { success: false, error: `Failed to get availability: ${freeBusyResponse.statusText}` }
+      }
+
+      const freeBusyData = await freeBusyResponse.json()
+
+      // Transform free/busy data
+      const availability = emailsToCheck.map((email, index) => {
+        const schedule = freeBusyData.value?.[index] || {}
+        const busyTimes = schedule.busyTimes || []
+
+        return {
+          email,
+          availability: busyTimes.map((period: {
+            start?: { dateTime?: string } | string
+            end?: { dateTime?: string } | string
+            status?: string
+          }) => ({
+            start: (typeof period.start === 'object' ? period.start?.dateTime : period.start) || '',
+            end: (typeof period.end === 'object' ? period.end?.dateTime : period.end) || '',
+            status: (period.status || 'busy') as 'free' | 'busy' | 'tentative' | 'outOfOffice'
+          }))
+        }
+      })
+
+      console.log(`✅ FINAL OPTIMIZED: Retrieved availability for ${emailsToCheck.length} emails`)
+      return {
+        success: true,
+        availability
+      }
+
+    } catch (error) {
+      console.error('Error in final optimized getAvailabilityForClient:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred'
+      }
+    }
+  }
+
+  /**
    * Find available time slots with enhanced optimization
    */
   static async findAvailableSlotsForClient(
@@ -521,8 +769,6 @@ export class FinalOptimizedCalendarOperations {
         }
       )
 
-      console.log(`✅ FINAL OPTIMIZED: Found ${slotCheck.availableSlots?.length || 0} available slots`)
-
       return {
         success: true,
         hasConflict: slotCheck.hasConflict,
@@ -563,8 +809,6 @@ export class FinalOptimizedCalendarOperations {
     error?: string
   }> {
     try {
-      console.log(`🚀 FINAL OPTIMIZED: Searching calendar events for client ${clientId} with query: ${searchQuery}`)
-      
       // Get all client data with advanced caching
       const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
       if (!clientData) {
@@ -621,9 +865,6 @@ export class FinalOptimizedCalendarOperations {
       )
 
       const formattedEvents = formatGraphEventsAsString(events)
-
-      console.log(`✅ FINAL OPTIMIZED: Found ${events.length} matching events for client ${clientId}`)
-
       return {
         success: true,
         events,

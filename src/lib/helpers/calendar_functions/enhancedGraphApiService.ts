@@ -309,6 +309,13 @@ export class EnhancedGraphApiService {
       ? '/me/events' 
       : `/me/calendars/${calendarId}/events`
 
+    console.log(`📧 ENHANCED: Creating event - Microsoft Graph will automatically send invitations to attendees`)
+    console.log(`📧 ENHANCED: Event data:`, JSON.stringify(eventData, null, 2))
+    
+    if (eventData.isOnlineMeeting) {
+      console.log(`💻 ENHANCED: Teams meeting requested with provider: ${eventData.onlineMeetingProvider}`)
+    }
+
     const requestStart = Date.now()
     const response = await makeGraphRequest(connection, endpoint, {
       method: 'POST',
@@ -325,6 +332,16 @@ export class EnhancedGraphApiService {
     }
 
     const event: GraphEvent = await response.json()
+    
+    // Log Teams meeting details if present
+    if (event.onlineMeeting) {
+      console.log(`✅ ENHANCED: Teams meeting created successfully:`)
+      console.log(`   Join URL: ${event.onlineMeeting.joinUrl || 'Not available'}`)
+      console.log(`   Conference ID: ${event.onlineMeeting.conferenceId || 'Not available'}`)
+    } else if (eventData.isOnlineMeeting) {
+      console.log(`⚠️ ENHANCED: Teams meeting was requested but not created in the response`)
+      console.log(`   Event response keys:`, Object.keys(event))
+    }
 
     return {
       success: true,
