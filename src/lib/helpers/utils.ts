@@ -568,6 +568,7 @@ export const getAgentByCalendarConnection = async (calendarConnectionId: string,
         profile_id,
         client_id,
         is_active,
+        agent_type,
         profiles (
           id,
           name,

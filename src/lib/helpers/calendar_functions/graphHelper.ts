@@ -285,7 +285,7 @@ export async function getGraphEvents(
     }
     
     params.append('$orderby', 'start/dateTime')
-    params.append('$select', 'id,subject,body,start,end,location,attendees,organizer,isAllDay,isCancelled,importance,showAs,responseStatus,onlineMeeting,createdDateTime,lastModifiedDateTime,webLink')
+    params.append('$select', 'id,subject,body,start,end,location,attendees,organizer,isAllDay,isCancelled,importance,showAs,responseStatus,onlineMeeting,extensions,createdDateTime,lastModifiedDateTime,webLink')
 
     if (params.toString()) {
       endpoint += `?${params.toString()}`
@@ -702,6 +702,28 @@ export function parseGraphDateRequest(
 }
 
 /**
+ * Extract metadata from Microsoft Graph event extensions
+ */
+export function extractEventMetadata(event: GraphEvent): Record<string, unknown> | null {
+  if (!event.extensions || event.extensions.length === 0) {
+    return null
+  }
+
+  const metadataExtension = event.extensions.find(
+    ext => ext.extensionName === 'com.leadai.booking.metadata'
+  )
+
+  if (!metadataExtension) {
+    return null
+  }
+
+  // Remove Microsoft Graph specific properties
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { '@odata.type': _odataType, extensionName: _extensionName, ...metadata } = metadataExtension
+  return metadata
+}
+
+/**
  * Format Graph events for display
  */
 export function formatGraphEventsAsString(events: GraphEvent[]): string {
@@ -754,6 +776,19 @@ export function formatGraphEventsAsString(events: GraphEvent[]): string {
         const totalAttendees = event.attendees.length - 1 // Exclude organizer
         output += `👤 ${attendeeName}${totalAttendees > 1 ? ` +${totalAttendees - 1} more` : ''}\n`
       }
+    }
+    
+    // Add metadata information if available
+    const metadata = extractEventMetadata(event)
+    if (metadata) {
+      output += `📊 ${metadata.booking_source || 'N/A'}`
+      if (metadata.appointment_type) {
+        output += ` | ${metadata.appointment_type}`
+      }
+      if (metadata.call_context) {
+        output += ` | Call: ${metadata.call_context}`
+      }
+      output += '\n'
     }
     
     output += `🆔 ${event.id}\n\n`
