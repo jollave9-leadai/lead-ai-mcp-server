@@ -246,6 +246,17 @@ export class FinalOptimizedCalendarOperations {
             content: `<p>Meeting details:</p>${teamsInfo.replace(/\n/g, '<br>')}`
           }
         }
+      }
+
+      // Add metadata as Microsoft Graph extension
+      if (request.metadata) {
+        eventData.extensions = [{
+          '@odata.type': 'microsoft.graph.openTypeExtension',
+          extensionName: 'com.leadai.booking.metadata',
+          ...request.metadata
+        }]
+        
+        console.log('📊 Adding metadata to event:', request.metadata)
       } 
 
       // Create event using enhanced Graph API service

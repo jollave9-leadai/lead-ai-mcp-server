@@ -101,6 +101,11 @@ export interface GraphEvent {
     tollNumber?: string
     tollFreeNumbers?: string[]
   }
+  extensions?: Array<{
+    '@odata.type': string
+    extensionName: string
+    [key: string]: unknown
+  }>
   createdDateTime?: string
   lastModifiedDateTime?: string
   webLink?: string
@@ -180,6 +185,12 @@ export interface CreateGraphEventRequest {
   isOnlineMeeting?: boolean
   onlineMeetingProvider?: 'teamsForBusiness' | 'skypeForBusiness' | 'skypeForConsumer'
   responseRequested?: boolean
+  // Microsoft Graph extensions for custom metadata
+  extensions?: Array<{
+    '@odata.type': string
+    extensionName: string
+    [key: string]: unknown
+  }>
 }
 
 export type UpdateGraphEventRequest = Partial<CreateGraphEventRequest>
@@ -272,6 +283,17 @@ export interface CreateGraphEventMCPRequest {
   location?: string
   isOnlineMeeting?: boolean
   calendarId?: string
+  metadata?: {
+    client_id?: number
+    agent_id?: number
+    customer_id?: number | null
+    booking_source?: string
+    call_context?: string | null
+    customer_phone?: string | null
+    created_via?: string // Agent type from agents.agent_type column
+    appointment_type?: string
+    [key: string]: unknown
+  }
 }
 
 export interface GetAvailabilityRequest {
