@@ -17,7 +17,7 @@ export const getCustomerWithFuzzySearch = async (
   // TODO: replace created_by with client_id
   const { data: customers } = await supabase
     .from("customer_pipeline_items_with_customers")
-    .select("full_name, phone_number, email, pipeline_stage_id")
+    .select("id, full_name, phone_number, email, pipeline_stage_id, company")
     .eq("created_by", clientId);
 
   const fuse = new Fuse(customers || [], {
@@ -174,11 +174,14 @@ export const initiateCall = async (
   });
 };
 
+
 export const getCustomerPipeLineWithFuzzySearch = async (fullName: string) => {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
+  
+  
   const { data: customerPipeLines } = await supabase
     .from("customer_pipeline_items_with_customers")
     .select("id, full_name, created_by, pipeline_stage_id");
@@ -541,5 +544,163 @@ export const sendEmail = async (
   } catch (smsError) {
     console.error("Failed to send Email:", smsError);
     return null;
+  }
+};
+
+
+/**
+ * Get agent assigned to a calendar connection
+ */
+export const getAgentByCalendarConnection = async (calendarConnectionId: string, clientId: number) => {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  const { data: assignment, error } = await supabase
+    .schema("lead_dialer")
+    .from("agent_calendar_assignments")
+    .select(`
+      agent_id,
+      agents!inner (
+        id,
+        name,
+        profile_id,
+        client_id,
+        is_active,
+        profiles (
+          id,
+          name,
+          office_hours,
+          timezone
+        )
+      )
+    `)
+    .eq("calendar_connection_id", calendarConnectionId)
+    .eq("client_id", clientId)
+    .single();
+
+  if (error) {
+    console.error("Error getting agent by calendar connection:", error);
+    return null;
+  }
+
+  return assignment;
+};
+
+/**
+ * Check if a time slot is within office hours
+ */
+export const isWithinOfficeHours = (
+  dateTime: string,
+  officeHours: Record<string, { start: string; end: string; enabled: boolean }>,
+  timezone: string = 'Australia/Melbourne'
+): { isWithin: boolean; reason?: string } => {
+  if (!officeHours) {
+    return { isWithin: true }; // No office hours restriction
+  }
+
+  try {
+    const date = new Date(dateTime);
+    const dayOfWeek = date.toLocaleDateString('en-US', { 
+      weekday: 'long',
+      timeZone: timezone 
+    }).toLowerCase();
+    
+    const timeString = date.toLocaleTimeString('en-US', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: timezone
+    });
+
+    // Convert office hours format - assuming it's like:
+    // { "monday": { "start": "09:00", "end": "17:00", "enabled": true }, ... }
+    const daySchedule = officeHours[dayOfWeek];
+    
+    if (!daySchedule || !daySchedule.enabled) {
+      return { 
+        isWithin: false, 
+        reason: `Agent is not available on ${dayOfWeek}s` 
+      };
+    }
+
+    const startTime = daySchedule.start;
+    const endTime = daySchedule.end;
+
+    if (timeString < startTime || timeString > endTime) {
+      return { 
+        isWithin: false, 
+        reason: `Time ${timeString} is outside office hours (${startTime} - ${endTime}) on ${dayOfWeek}s` 
+      };
+    }
+
+    return { isWithin: true };
+  } catch (error) {
+    console.error("Error checking office hours:", error);
+    return { isWithin: true }; // Default to allowing if there's an error
+  }
+};
+
+/**
+ * Get available time slots within office hours
+ */
+export const getOfficeHoursSlots = (
+  date: string,
+  officeHours: Record<string, { start: string; end: string; enabled: boolean }>,
+  timezone: string = 'Australia/Melbourne',
+  slotDurationMinutes: number = 60
+): Array<{ start: string; end: string }> => {
+  if (!officeHours) {
+    return []; // No office hours defined
+  }
+
+  try {
+    const targetDate = new Date(date);
+    const dayOfWeek = targetDate.toLocaleDateString('en-US', { 
+      weekday: 'long',
+      timeZone: timezone 
+    }).toLowerCase();
+
+    const daySchedule = officeHours[dayOfWeek];
+    
+    if (!daySchedule || !daySchedule.enabled) {
+      return []; // Not available on this day
+    }
+
+    const slots: Array<{ start: string; end: string }> = [];
+    const startTime = daySchedule.start; // e.g., "09:00"
+    const endTime = daySchedule.end;     // e.g., "17:00"
+
+    // Parse start and end times
+    const [startHour, startMinute] = startTime.split(':').map(Number);
+    const [endHour, endMinute] = endTime.split(':').map(Number);
+
+    // Create datetime objects for the target date
+    const startDateTime = new Date(targetDate);
+    startDateTime.setHours(startHour, startMinute, 0, 0);
+
+    const endDateTime = new Date(targetDate);
+    endDateTime.setHours(endHour, endMinute, 0, 0);
+
+    // Generate slots every 30 minutes within office hours
+    let currentSlot = new Date(startDateTime);
+    
+    while (currentSlot.getTime() + (slotDurationMinutes * 60 * 1000) <= endDateTime.getTime()) {
+      const slotEnd = new Date(currentSlot.getTime() + (slotDurationMinutes * 60 * 1000));
+      
+      slots.push({
+        start: currentSlot.toISOString(),
+        end: slotEnd.toISOString()
+      });
+
+      // Move to next slot (30-minute increments)
+      currentSlot = new Date(currentSlot.getTime() + (30 * 60 * 1000));
+    }
+
+    return slots;
+  } catch (error) {
+    console.error("Error generating office hours slots:", error);
+    return [];
   }
 };

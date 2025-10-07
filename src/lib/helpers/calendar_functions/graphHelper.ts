@@ -79,17 +79,8 @@ function convertToWindowsTimezone(ianaTimezone: string): string {
 /**
  * Get calendar connection for a client from database
  */
-export async function getCalendarConnection(clientId: number): Promise<GraphCalendarConnection | null> {
+export async function getCalendarConnection(): Promise<GraphCalendarConnection | null> {
   try {
-    // This would be replaced with your actual database query
-    // For now, returning null as placeholder
-    console.log(`Getting calendar connection for client ${clientId}`)
-    
-    // Example query structure:
-    // SELECT * FROM lead_dialer.calendar_connections 
-    // WHERE client_id = $1 AND is_connected = true 
-    // ORDER BY created_at DESC LIMIT 1
-    
     return null
   } catch (error) {
     console.error('Error getting calendar connection:', error)
@@ -391,6 +382,10 @@ export async function createGraphEvent(
     console.log(`📧 Creating event - Microsoft Graph will automatically send invitations to attendees`)
     console.log(`📧 Event data:`, JSON.stringify(eventData, null, 2))
     
+    if (eventData.isOnlineMeeting) {
+      console.log(`💻 Teams meeting requested with provider: ${eventData.onlineMeetingProvider}`)
+    }
+    
     const response = await makeGraphRequest(connection, endpoint, {
       method: 'POST',
       body: JSON.stringify(eventData),
@@ -406,6 +401,16 @@ export async function createGraphEvent(
     }
 
     const event: GraphEvent = await response.json()
+    
+    // Log Teams meeting details if present
+    if (event.onlineMeeting) {
+      console.log(`✅ Teams meeting created successfully:`)
+      console.log(`   Join URL: ${event.onlineMeeting.joinUrl || 'Not available'}`)
+      console.log(`   Conference ID: ${event.onlineMeeting.conferenceId || 'Not available'}`)
+    } else if (eventData.isOnlineMeeting) {
+      console.log(`⚠️ Teams meeting was requested but not created in the response`)
+      console.log(`   Event response keys:`, Object.keys(event))
+    }
 
     return {
       success: true,
@@ -441,8 +446,6 @@ export async function updateGraphEvent(
       method: 'PATCH',
       body: JSON.stringify(eventData),
     })
-    
-    console.log(`📧 Updating event with email notifications enabled`)
     
     if (!response.ok) {
       const error: GraphErrorResponse = await response.json()
@@ -488,13 +491,30 @@ export async function deleteGraphEvent(
       method: 'DELETE',
     })
     
-    console.log(`📧 Deleting event with email notifications enabled`)
     
     if (!response.ok) {
-      const error: GraphErrorResponse = await response.json()
+      let errorMessage = `HTTP ${response.status}: ${response.statusText}`
+      
+      try {
+        const error: GraphErrorResponse = await response.json()
+        errorMessage = error.error.message || errorMessage
+        
+        // Handle specific Microsoft Graph error cases
+        if (response.status === 404) {
+          errorMessage = 'Event not found. It may have already been deleted or the event ID is invalid.'
+        } else if (response.status === 403) {
+          errorMessage = 'Permission denied. You may not have permission to delete this event.'
+        } else if (response.status === 429) {
+          errorMessage = 'Too many requests. Please try again in a few moments.'
+        }
+      } catch (parseError) {
+        console.warn('Failed to parse error response:', parseError)
+        // Use the default HTTP error message
+      }
+      
       return {
         success: false,
-        error: error.error.message,
+        error: errorMessage,
       }
     }
 
@@ -628,13 +648,6 @@ export function parseGraphDateRequest(
       // Convert Luxon weekday (1=Mon, 7=Sun) to our array index (0=Sun, 6=Sat)
       const currentWeekday = nowInClientTZ.weekday === 7 ? 0 : nowInClientTZ.weekday
       
-      console.log(`🗓️ DEBUG "this ${dayName}":`, {
-        currentDate: nowInClientTZ.toFormat('yyyy-MM-dd (cccc)'),
-        luxonWeekday: nowInClientTZ.weekday,
-        currentWeekday: currentWeekday,
-        targetDay: targetDay,
-        targetDayName: dayName
-      })
       
       let diff = (targetDay - currentWeekday + 7) % 7
       // If diff is 0, it means it's today - for "this friday" we want the upcoming friday
@@ -645,8 +658,6 @@ export function parseGraphDateRequest(
       start = nowInClientTZ.plus({ days: diff }).startOf("day")
       end = nowInClientTZ.plus({ days: diff }).endOf("day")
       description = `This ${dayName.charAt(0).toUpperCase() + dayName.slice(1)}`
-      
-      console.log(`🗓️ Result: ${diff} days from now = ${start.toFormat('yyyy-MM-dd (cccc)')}`)
       break
     }
 
@@ -683,17 +694,6 @@ export function parseGraphDateRequest(
   const startUTC = start.toUTC().toISO() || ''
   const endUTC = end.toUTC().toISO() || ''
 
-  console.log(`📅 Date parsing for "${dateRequest}" in ${clientTimezone}:`, {
-    description,
-    clientTimezone,
-    startInClientTZ: start.toFormat('yyyy-MM-dd HH:mm:ss ZZZZ'),
-    endInClientTZ: end.toFormat('yyyy-MM-dd HH:mm:ss ZZZZ'),
-    startUTC,
-    endUTC,
-    targetDate: start.toFormat('yyyy-MM-dd'),
-    note: "Client timezone range → UTC for Microsoft Graph API"
-  })
-
   return {
     start: startUTC,
     end: endUTC,
@@ -705,34 +705,19 @@ export function parseGraphDateRequest(
  * Format Graph events for display
  */
 export function formatGraphEventsAsString(events: GraphEvent[]): string {
-  console.log(`🎨 Formatting ${events?.length || 0} events for display`)
-  
   if (!events || events.length === 0) {
-    console.log(`📅 No events to format`)
     return '📅 No events found for the specified time period.'
   }
 
-  console.log(`📝 Events to format:`, events.map((e, i) => ({
-    index: i + 1,
-    subject: e.subject,
-    rawStart: e.start.dateTime,
-    rawEnd: e.end.dateTime,
-    startTimeZone: e.start.timeZone,
-    endTimeZone: e.end.timeZone,
-  })))
-
-  let output = `Found ${events.length} event(s):\n\n`
+  let output = `📅 **${events.length} Event(s)**\n\n`
 
   events.forEach((event, index) => {
     const startDate = new Date(event.start.dateTime)
     const endDate = new Date(event.end.dateTime)
     
-    // Microsoft Graph already returns events in the requested timezone via Prefer header
-    // so we don't need to apply timezone conversion again
     const formattedDate = startDate.toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
+      weekday: 'short',
+      month: 'short',
       day: 'numeric',
     })
     
@@ -748,41 +733,31 @@ export function formatGraphEventsAsString(events: GraphEvent[]): string {
       hour12: true,
     })
 
-    output += `**${index + 1}. ${event.subject || 'Untitled Event'}**\n`
-    output += `   📅 **Date**: ${formattedDate}\n`
-    output += `   🕐 **Time**: ${startTime} - ${endTime}\n`
+    output += `**${index + 1}. ${event.subject || 'Untitled'}**\n`
+    output += `📅 ${formattedDate} • 🕐 ${startTime}-${endTime}\n`
     
     if (event.location?.displayName) {
-      output += `   📍 **Location**: ${event.location.displayName}\n`
-    }
-    
-    if (event.attendees && event.attendees.length > 0) {
-      const attendeeNames = event.attendees
-        .map(a => a.emailAddress.name || a.emailAddress.address)
-        .join(', ')
-      output += `   👥 **Attendees**: ${attendeeNames}\n`
-    }
-    
-    if (event.organizer) {
-      output += `   👤 **Organizer**: ${event.organizer.emailAddress.name || event.organizer.emailAddress.address}\n`
+      output += `📍 ${event.location.displayName}\n`
     }
     
     if (event.onlineMeeting?.joinUrl) {
-      output += `   💻 **Online Meeting**: Available\n`
+      output += `💻 Teams Meeting: ${event.onlineMeeting.joinUrl}\n`
     }
     
-    if (event.body?.content && event.body.content.trim()) {
-      const description = event.body.content.replace(/<[^>]*>/g, '').trim()
-      if (description.length > 100) {
-        output += `   📝 **Description**: ${description.substring(0, 100)}...\n`
-      } else if (description) {
-        output += `   📝 **Description**: ${description}\n`
+    // Show first attendee (excluding organizer)
+    if (event.attendees && event.attendees.length > 1) {
+      const firstAttendee = event.attendees.find(a => 
+        a.emailAddress.address !== event.organizer?.emailAddress.address
+      )
+      if (firstAttendee) {
+        const attendeeName = firstAttendee.emailAddress.name || firstAttendee.emailAddress.address
+        const totalAttendees = event.attendees.length - 1 // Exclude organizer
+        output += `👤 ${attendeeName}${totalAttendees > 1 ? ` +${totalAttendees - 1} more` : ''}\n`
       }
     }
     
-    output += `   🆔 **Event ID**: ${event.id}\n`
-    output += '\n'
+    output += `🆔 ${event.id}\n\n`
   })
 
-  return output
+  return output.trim()
 }

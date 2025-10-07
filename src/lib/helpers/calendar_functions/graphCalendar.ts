@@ -23,9 +23,9 @@ import {
   getFreeBusyInfo,
   parseGraphDateRequest,
   formatGraphEventsAsString,
-  makeGraphRequest,
 } from './graphHelper'
 import { getClientTimezone } from './getClientTimeZone'
+import { isWithinOfficeHours } from '../utils'
 
 /**
  * Find available time slots near the requested time
@@ -36,7 +36,9 @@ async function findAvailableSlots(
   requestedEndTime: string,
   timeZone: string,
   durationMinutes: number = 60,
-  maxSuggestions: number = 3
+  maxSuggestions: number = 3,
+  officeHours?: Record<string, { start: string; end: string; enabled: boolean }> | null,
+  agentTimezone?: string
 ): Promise<{
   hasConflict: boolean
   availableSlots?: Array<{
@@ -141,14 +143,36 @@ async function findAvailableSlots(
     while (currentTime < searchEnd && availableSlots.length < maxSuggestions) {
       const slotEnd = new Date(currentTime.getTime() + durationMinutes * 60 * 1000)
       
-      // Skip if slot is outside business hours (9 AM - 6 PM Melbourne time)
-      const melbourneHour = parseInt(currentTime.toLocaleString('en-AU', {
-        timeZone: 'Australia/Melbourne',
-        hour: '2-digit',
-        hour12: false
-      }))
+      // Check if slot is within office hours (if provided) or default business hours
+      let isWithinHours = true;
+      let hoursReason = '';
       
-      if (melbourneHour >= 9 && melbourneHour < 18) {
+      if (officeHours) {
+        // Use agent's office hours
+        const officeHoursCheck = isWithinOfficeHours(
+          currentTime.toISOString(), 
+          officeHours, 
+          agentTimezone || timeZone
+        );
+        isWithinHours = officeHoursCheck.isWithin;
+        hoursReason = officeHoursCheck.reason || '';
+      } else {
+        // Fallback to default business hours (9 AM - 6 PM Melbourne time)
+        const melbourneHour = parseInt(currentTime.toLocaleString('en-AU', {
+          timeZone: 'Australia/Melbourne',
+          hour: '2-digit',
+          hour12: false
+        }));
+        isWithinHours = melbourneHour >= 9 && melbourneHour < 18;
+        hoursReason = isWithinHours ? '' : 'Outside default business hours (9 AM - 6 PM)';
+      }
+      
+      // Check if slot is not in the past (with 15-minute buffer)
+      const now = new Date()
+      const minimumSlotTime = new Date(now.getTime() + 15 * 60 * 1000) // 15 minutes from now
+      const isNotInPast = currentTime >= minimumSlotTime
+      
+      if (isWithinHours && isNotInPast) {
         if (!hasConflictWithBusy(currentTime, slotEnd)) {
           availableSlots.push({
             start: currentTime.toISOString(),
@@ -158,6 +182,12 @@ async function findAvailableSlots(
           })
           
           console.log(`✅ Found available slot: ${formatMelbourneTime(currentTime)} - ${formatMelbourneTime(slotEnd)}`)
+        }
+      } else {
+        if (!isWithinHours) {
+          console.log(`⏭️ Skipping slot ${formatMelbourneTime(currentTime)}: ${hoursReason}`)
+        } else if (!isNotInPast) {
+          console.log(`⏭️ Skipping slot ${formatMelbourneTime(currentTime)}: Too soon (less than 15 minutes from now)`)
         }
       }
       
@@ -197,17 +227,46 @@ async function checkForConflicts(
   timeZone: string
 ): Promise<{ hasConflict: boolean; conflictDetails?: string }> {
   try {
-    console.log(`🔍 Conflict Check - New event: ${startDateTime} to ${endDateTime}`)
+    console.log(`🔍 CONFLICT DETECTION START`)
+    console.log(`🔍 New event request: ${startDateTime} to ${endDateTime}`)
+    console.log(`🔍 Timezone: ${timeZone}`)
     
-    // Parse the input times properly (they include timezone info)
-    const newStart = new Date(startDateTime)
-    const newEnd = new Date(endDateTime)
+    // Parse the input times properly - ensure they're treated as being in the specified timezone
+    let newStart: Date
+    let newEnd: Date
+    
+    // Check if the datetime strings already include timezone info
+    if (startDateTime.includes('+') || startDateTime.includes('Z')) {
+      // Already has timezone info, parse directly
+      newStart = new Date(startDateTime)
+      newEnd = new Date(endDateTime)
+      console.log(`🔍 Input times already have timezone info`)
+    } else {
+      // No timezone in string, assume it's in the client's timezone
+      // For Melbourne (UTC+10), we need to add the offset
+      if (timeZone === 'Australia/Melbourne') {
+        newStart = new Date(`${startDateTime}+10:00`)
+        newEnd = new Date(`${endDateTime}+10:00`)
+        console.log(`🔍 Parsed input times as Melbourne timezone (+10:00)`)
+      } else {
+        // For other timezones, parse as-is and hope for the best
+        newStart = new Date(startDateTime)
+        newEnd = new Date(endDateTime)
+        console.log(`🔍 Parsed input times as-is (timezone: ${timeZone})`)
+      }
+    }
+    
+    console.log(`🔍 Parsed new event times (UTC):`)
+    console.log(`🔍 - Start: ${newStart.toISOString()} (Melbourne: ${newStart.toLocaleString('en-AU', {timeZone: 'Australia/Melbourne'})})`)
+    console.log(`🔍 - End: ${newEnd.toISOString()} (Melbourne: ${newEnd.toLocaleString('en-AU', {timeZone: 'Australia/Melbourne'})})`)
     
     // Expand the search window to catch nearby events (in UTC)
     const searchStart = new Date(newStart.getTime() - 2 * 60 * 60 * 1000) // 2 hours before
     const searchEnd = new Date(newEnd.getTime() + 2 * 60 * 60 * 1000) // 2 hours after
     
-    console.log(`🔍 Searching for existing events from ${searchStart.toISOString()} to ${searchEnd.toISOString()}`)
+    console.log(`🔍 Searching for existing events in expanded window:`)
+    console.log(`🔍 - Search Start: ${searchStart.toISOString()}`)
+    console.log(`🔍 - Search End: ${searchEnd.toISOString()}`)
     
     // Get events in the expanded time range
     const eventsResponse = await getGraphEvents(connection, {
@@ -217,12 +276,19 @@ async function checkForConflicts(
     })
 
     if (!eventsResponse.success || !eventsResponse.events) {
-      console.log(`🔍 No events found or error getting events`)
+      console.log(`❌ No events found or error getting events:`, eventsResponse.error)
       return { hasConflict: false }
     }
 
-    console.log(`🔍 Found ${eventsResponse.events.length} existing events to check`)
-    console.log(`🔍 New event time range: ${newStart.toISOString()} to ${newEnd.toISOString()}`)
+    console.log(`🔍 Found ${eventsResponse.events.length} existing events to check against`)
+    
+    // Log all existing events for debugging
+    eventsResponse.events.forEach((event, index) => {
+      console.log(`📅 Event ${index + 1}: "${event.subject}"`)
+      console.log(`   Raw times: ${event.start.dateTime} to ${event.end.dateTime}`)
+      console.log(`   Timezone: ${event.start.timeZone}`)
+      console.log(`   Cancelled: ${event.isCancelled}`)
+    })
     
     const conflictingEvents = eventsResponse.events.filter(event => {
       // Skip cancelled events
@@ -231,62 +297,95 @@ async function checkForConflicts(
         return false
       }
       
-      // Parse existing event times with proper timezone handling
-      // Microsoft Graph returns datetime without timezone offset, but includes timezone info
+      console.log(`\n🔍 Analyzing event: "${event.subject}"`)
+      console.log(`   Raw start: ${event.start.dateTime}`)
+      console.log(`   Raw end: ${event.end.dateTime}`)
+      console.log(`   Timezone: ${event.start.timeZone}`)
+      
+      // Parse existing event times - Microsoft Graph should return times in UTC when we use calendarView
+      // But let's handle different timezone scenarios
       let eventStart: Date
       let eventEnd: Date
       
-      if (event.start.timeZone && event.start.timeZone !== 'tzone://Microsoft/Custom') {
-        // If timezone is provided, parse with timezone context
-        const startStr = event.start.dateTime.includes('T') ? event.start.dateTime : `${event.start.dateTime}T00:00:00`
-        const endStr = event.end.dateTime.includes('T') ? event.end.dateTime : `${event.end.dateTime}T00:00:00`
-        
-        // For AUS Eastern Standard Time, we need to handle it as Melbourne time
+      // Try to parse the datetime strings directly first
+      const startStr = event.start.dateTime.includes('T') ? event.start.dateTime : `${event.start.dateTime}T00:00:00`
+      const endStr = event.end.dateTime.includes('T') ? event.end.dateTime : `${event.end.dateTime}T00:00:00`
+      
+      // Check if the datetime string already includes timezone info
+      if (startStr.includes('+') || startStr.includes('Z')) {
+        // Already has timezone info, parse directly
+        eventStart = new Date(startStr)
+        eventEnd = new Date(endStr)
+        console.log(`   ✅ Parsed with timezone info`)
+      } else if (event.start.timeZone && event.start.timeZone !== 'tzone://Microsoft/Custom') {
+        // No timezone in string, but timezone provided in metadata
         if (event.start.timeZone === 'AUS Eastern Standard Time') {
-          // Parse as if it's Melbourne time, then convert to UTC
+          // Assume the time is in Melbourne timezone, convert to UTC
           eventStart = new Date(`${startStr}+10:00`)
           eventEnd = new Date(`${endStr}+10:00`)
+          console.log(`   ✅ Parsed as Melbourne time (+10:00)`)
         } else {
-          eventStart = new Date(event.start.dateTime)
-          eventEnd = new Date(event.end.dateTime)
+          // For other timezones, try parsing as-is (might be UTC already)
+          eventStart = new Date(startStr)
+          eventEnd = new Date(endStr)
+          console.log(`   ⚠️ Parsed as-is (assuming UTC)`)
         }
       } else {
-        eventStart = new Date(event.start.dateTime)
-        eventEnd = new Date(event.end.dateTime)
+        // No timezone info, assume UTC
+        eventStart = new Date(startStr)
+        eventEnd = new Date(endStr)
+        console.log(`   ⚠️ No timezone info, assuming UTC`)
       }
       
-      // Check for exact time match first (same start time)
-      const exactMatch = Math.abs(eventStart.getTime() - newStart.getTime()) < 60000 // Within 1 minute
+      console.log(`   Parsed start (UTC): ${eventStart.toISOString()}`)
+      console.log(`   Parsed end (UTC): ${eventEnd.toISOString()}`)
+      console.log(`   Parsed start (Melbourne): ${eventStart.toLocaleString('en-AU', {timeZone: 'Australia/Melbourne'})}`)
+      console.log(`   Parsed end (Melbourne): ${eventEnd.toLocaleString('en-AU', {timeZone: 'Australia/Melbourne'})}`)
       
-      // Events overlap if: newStart < eventEnd AND newEnd > eventStart
+      // Check for overlap: Two events overlap if one starts before the other ends
+      // Event A overlaps Event B if: A.start < B.end AND A.end > B.start
       const hasOverlap = newStart < eventEnd && newEnd > eventStart
       
-      console.log(`📅 Checking "${event.subject}":`)
-      console.log(`   Existing UTC: ${eventStart.toISOString()} - ${eventEnd.toISOString()}`)
-      console.log(`   Existing MEL: ${eventStart.toLocaleString('en-AU', {timeZone: 'Australia/Melbourne'})} - ${eventEnd.toLocaleString('en-AU', {timeZone: 'Australia/Melbourne'})}`)
-      console.log(`   New UTC:      ${newStart.toISOString()} - ${newEnd.toISOString()}`)
-      console.log(`   New MEL:      ${newStart.toLocaleString('en-AU', {timeZone: 'Australia/Melbourne'})} - ${newEnd.toLocaleString('en-AU', {timeZone: 'Australia/Melbourne'})}`)
-      console.log(`   Raw event data: start=${event.start.dateTime}, tz=${event.start.timeZone}`)
-      console.log(`   Exact match: ${exactMatch ? '❌ YES - SAME TIME!' : '✅ NO'}`)
-      console.log(`   Overlap: ${hasOverlap ? '❌ YES - CONFLICT!' : '✅ NO'}`)
+      // Check for exact time match (within 1 minute tolerance)
+      const exactStartMatch = Math.abs(eventStart.getTime() - newStart.getTime()) < 60000
+      const exactEndMatch = Math.abs(eventEnd.getTime() - newEnd.getTime()) < 60000
+      const exactMatch = exactStartMatch && exactEndMatch
+      
+      console.log(`\n🔍 CONFLICT ANALYSIS:`)
+      console.log(`   New event:     ${newStart.toISOString()} - ${newEnd.toISOString()}`)
+      console.log(`   Existing event: ${eventStart.toISOString()} - ${eventEnd.toISOString()}`)
+      console.log(`   Overlap check: newStart(${newStart.toISOString()}) < eventEnd(${eventEnd.toISOString()}) = ${newStart < eventEnd}`)
+      console.log(`   Overlap check: newEnd(${newEnd.toISOString()}) > eventStart(${eventStart.toISOString()}) = ${newEnd > eventStart}`)
+      console.log(`   Has overlap: ${hasOverlap}`)
+      console.log(`   Exact match: ${exactMatch}`)
+      console.log(`   RESULT: ${hasOverlap || exactMatch ? '❌ CONFLICT DETECTED!' : '✅ NO CONFLICT'}`)
       
       return hasOverlap || exactMatch
     })
 
+    console.log(`\n🔍 FINAL CONFLICT SUMMARY:`)
+    console.log(`   Total events checked: ${eventsResponse.events.length}`)
+    console.log(`   Conflicting events: ${conflictingEvents.length}`)
+    
     if (conflictingEvents.length > 0) {
+      console.log(`\n❌ CONFLICTS DETECTED:`)
+      conflictingEvents.forEach((event, index) => {
+        console.log(`   ${index + 1}. "${event.subject}"`)
+        console.log(`      Time: ${event.start.dateTime} - ${event.end.dateTime}`)
+        console.log(`      Timezone: ${event.start.timeZone}`)
+      })
+      
       const conflictDetails = conflictingEvents.map(event => 
         `"${event.subject}" (${new Date(event.start.dateTime).toLocaleString()} - ${new Date(event.end.dateTime).toLocaleString()})`
       ).join(', ')
       
-      console.log(`⚠️ CONFLICTS FOUND: ${conflictingEvents.length} event(s)`)
-      console.log(`⚠️ Conflict details: ${conflictDetails}`)
       return { 
         hasConflict: true, 
         conflictDetails: `Conflicts with existing event(s): ${conflictDetails}` 
       }
     }
 
-    console.log(`✅ No conflicts found - time slot is available`)
+    console.log(`✅ NO CONFLICTS FOUND - Time slot is available for booking`)
     return { hasConflict: false }
   } catch (error) {
     console.error('❌ Error checking for conflicts:', error)
@@ -295,73 +394,6 @@ async function checkForConflicts(
   }
 }
 
-/**
- * Send explicit calendar invitation email using Microsoft Graph
- */
-async function sendCalendarInvitationEmail(
-  connection: GraphCalendarConnection,
-  event: GraphEvent,
-  request: CreateGraphEventMCPRequest
-): Promise<void> {
-  try {
-    const startDate = new Date(event.start.dateTime)
-    const endDate = new Date(event.end.dateTime)
-    
-    const emailBody = `
-<html>
-<body>
-<h2>📅 Calendar Invitation</h2>
-<p>You have been invited to a meeting:</p>
-
-<table style="border-collapse: collapse; width: 100%;">
-<tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Subject:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${event.subject}</td></tr>
-<tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Date:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${startDate.toLocaleDateString()}</td></tr>
-<tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Time:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${startDate.toLocaleTimeString()} - ${endDate.toLocaleTimeString()}</td></tr>
-<tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Organizer:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${connection.email}</td></tr>
-${event.location?.displayName ? `<tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Location:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${event.location.displayName}</td></tr>` : ''}
-${event.onlineMeeting?.joinUrl ? `<tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Join Online:</strong></td><td style="padding: 8px; border: 1px solid #ddd;"><a href="${event.onlineMeeting.joinUrl}">Join Teams Meeting</a></td></tr>` : ''}
-</table>
-
-${request.description ? `<p><strong>Description:</strong><br>${request.description}</p>` : ''}
-
-<p>Please add this event to your calendar and respond with your availability.</p>
-<p><strong>Event ID:</strong> ${event.id}</p>
-</body>
-</html>
-    `
-
-    const emailData = {
-      message: {
-        subject: `📅 Meeting Invitation: ${event.subject}`,
-        body: {
-          contentType: 'HTML',
-          content: emailBody
-        },
-        toRecipients: [{
-          emailAddress: {
-            address: request.attendeeEmail,
-            name: request.attendeeName
-          }
-        }]
-      }
-    }
-
-    // Use the makeGraphRequest helper to handle token refresh
-    const response = await makeGraphRequest(connection, '/me/sendMail', {
-      method: 'POST',
-      body: JSON.stringify(emailData)
-    })
-
-    if (response.ok) {
-      console.log(`✅ Calendar invitation email sent successfully to ${request.attendeeEmail}`)
-    } else {
-      const error = await response.text()
-      console.error(`❌ Failed to send invitation email:`, error)
-    }
-  } catch (error) {
-    console.error('Error sending calendar invitation email:', error)
-  }
-}
 
 /**
  * Get calendar events for a client using Microsoft Graph
@@ -498,6 +530,40 @@ export async function createCalendarEventForClient(
       }
     }
 
+    // Get agent office hours for this calendar connection
+    const { getAgentByCalendarConnection } = await import('../utils')
+    const agentAssignment = await getAgentByCalendarConnection(connection.id, clientId)
+    
+    let agentOfficeHours: Record<string, { start: string; end: string; enabled: boolean }> | null = null
+    let agentTimezone = clientTimezone
+    
+    if (agentAssignment && agentAssignment.agents) {
+      const agent = agentAssignment.agents as unknown as {
+        id: number;
+        name: string;
+        profiles: {
+          id: number;
+          name: string;
+          office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+          timezone: string;
+        } | {
+          id: number;
+          name: string;
+          office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+          timezone: string;
+        }[];
+      };
+      const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles
+      agentOfficeHours = profile.office_hours
+      agentTimezone = profile.timezone || clientTimezone
+      
+      console.log(`👤 Using office hours for agent: ${agent.name}`)
+      console.log(`🏢 Office hours:`, agentOfficeHours)
+      console.log(`🌍 Agent timezone: ${agentTimezone}`)
+    } else {
+      console.log(`⚠️ No agent assignment found, using default business hours`)
+    }
+
     // Prepare event data
     const eventData: CreateGraphEventRequest = {
       subject: request.subject,
@@ -544,13 +610,22 @@ export async function createCalendarEventForClient(
       responseRequested: true,
     }
 
-    console.log(`📧 Event will send notifications to:`)
+    console.log(`📧 Microsoft Graph will automatically send notifications to:`)
     console.log(`📧 - Organizer: ${connection.email} (${connection.display_name || 'No name'})`)
     console.log(`📧 - Attendee: ${request.attendeeEmail} (${request.attendeeName || 'No name'})`)
 
     // Check for conflicts and find available slots if needed
     console.log(`🔍 Checking for conflicts for new event: ${request.startDateTime} to ${request.endDateTime}`)
-    const slotCheck = await findAvailableSlots(connection, request.startDateTime, request.endDateTime, clientTimezone)
+    const slotCheck = await findAvailableSlots(
+      connection, 
+      request.startDateTime, 
+      request.endDateTime, 
+      clientTimezone,
+      60, // duration minutes
+      3,  // max suggestions
+      agentOfficeHours,
+      agentTimezone
+    )
     
     if (slotCheck.hasConflict) {
       console.log(`❌ CONFLICT DETECTED - Suggesting alternative slots`)
@@ -589,9 +664,25 @@ export async function createCalendarEventForClient(
       }
     }
 
+    console.log(`🔍 DEBUG: request.isOnlineMeeting = ${request.isOnlineMeeting}`)
+    
     if (request.isOnlineMeeting) {
+      console.log(`💻 TEAMS MEETING REQUESTED - Setting up Teams meeting`)
       eventData.isOnlineMeeting = true
       eventData.onlineMeetingProvider = 'teamsForBusiness'
+      
+      // Add Teams meeting information to the body if not already present
+      const teamsInfo = '\n\n--- Microsoft Teams Meeting ---\nJoin the meeting from your calendar or use the Teams app.\n'
+      if (eventData.body) {
+        eventData.body.content += teamsInfo
+      } else {
+        eventData.body = {
+          contentType: 'html',
+          content: `<p>Meeting details:</p>${teamsInfo.replace(/\n/g, '<br>')}`
+        }
+      }
+    } else {
+      console.log(`📝 REGULAR MEETING - No Teams meeting requested`)
     }
 
     // Create event in Microsoft Graph
@@ -608,11 +699,8 @@ export async function createCalendarEventForClient(
       }
     }
 
-    // Send explicit email invitation to attendee
-    if (eventResponse.event && request.attendeeEmail) {
-      console.log(`📧 Sending explicit email invitation to ${request.attendeeEmail}`)
-      await sendCalendarInvitationEmail(connection, eventResponse.event, request)
-    }
+    // Microsoft Graph automatically sends email invitations to attendees
+    console.log(`📧 Microsoft Graph will automatically send email invitations to attendees`)
 
     return {
       success: true,
@@ -774,6 +862,16 @@ export async function deleteCalendarEventForClient(
         success: false,
         error: deleteResponse.error,
       }
+    }
+
+    // Invalidate cache after successful deletion
+    try {
+      const { AdvancedCacheService } = await import('../cache/advancedCacheService')
+      await AdvancedCacheService.invalidateConnection(connection.id)
+      console.log(`🗑️ Cache invalidated for connection ${connection.id} after event deletion`)
+    } catch (cacheError) {
+      console.warn('Failed to invalidate cache after event deletion:', cacheError)
+      // Don't fail the deletion if cache invalidation fails
     }
 
     return {
@@ -996,6 +1094,36 @@ export async function findAvailableSlotsForClient(
       }
     }
 
+    // Get agent office hours for this calendar connection
+    const { getAgentByCalendarConnection } = await import('../utils')
+    const agentAssignment = await getAgentByCalendarConnection(connection.id, clientId)
+    
+    let agentOfficeHours: Record<string, { start: string; end: string; enabled: boolean }> | null = null
+    let agentTimezone = clientTimezone
+    
+    if (agentAssignment && agentAssignment.agents) {
+      const agent = agentAssignment.agents as unknown as {
+        id: number;
+        name: string;
+        profiles: {
+          id: number;
+          name: string;
+          office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+          timezone: string;
+        } | {
+          id: number;
+          name: string;
+          office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+          timezone: string;
+        }[];
+      };
+      const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles
+      agentOfficeHours = profile.office_hours
+      agentTimezone = profile.timezone || clientTimezone
+      
+      console.log(`👤 Using office hours for agent: ${agent.name}`)
+    }
+
     // Find available slots
     const slotCheck = await findAvailableSlots(
       connection, 
@@ -1003,7 +1131,9 @@ export async function findAvailableSlotsForClient(
       requestedEndTime, 
       clientTimezone, 
       durationMinutes, 
-      maxSuggestions
+      maxSuggestions,
+      agentOfficeHours,
+      agentTimezone
     )
 
     return {
