@@ -579,6 +579,8 @@ const handler = createMcpHandler((server) => {
     }
   );
 
-});
+},
+{}, 
+{ basePath: "/api/booking"});
 
 export { handler as GET, handler as POST };
