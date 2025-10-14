@@ -27,6 +27,131 @@ export const getCustomerWithFuzzySearch = async (
   return fuse.search(name);
 };
 
+export const getContactWithFuzzySearch = async (
+  name: string,
+  clientId: string,
+  searchType: 'customer' | 'lead' | 'both' = 'both'
+): Promise<{
+  found: boolean
+  contact?: {
+    id: number
+    full_name: string
+    email: string
+    phone_number?: string
+    company?: string
+    source: 'customer' | 'lead'
+  }
+  score?: number
+}> => {
+  try {
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.DEVELOP_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
+    const allContacts: Array<{
+      id: number
+      full_name: string
+      email: string
+      phone_number?: string
+      company?: string
+      source: 'customer' | 'lead'
+    }> = [];
+
+    // Search customers if requested
+    if (searchType === 'customer' || searchType === 'both') {
+      console.log(`🔍 Searching customers for "${name}" (client: ${clientId})`);
+      
+      const { data: customers, error: customerError } = await supabase
+        .schema('lead_dialer')
+        .from('customers')
+        .select('id, full_name, first_name, last_name, email, phone_number, company, client_id')
+        .eq('client_id', parseInt(clientId))
+        .eq('is_active', true);
+
+      if (customerError) {
+        console.error('Error fetching customers:', customerError);
+      } else if (customers) {
+        const customerContacts = customers.map(customer => ({
+          id: customer.id,
+          full_name: customer.full_name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+          email: customer.email,
+          phone_number: customer.phone_number,
+          company: customer.company,
+          source: 'customer' as const
+        })).filter(contact => contact.email); // Only include contacts with email
+
+        allContacts.push(...customerContacts);
+        console.log(`📊 Found ${customerContacts.length} customers with emails`);
+      }
+    }
+
+    // Search leads if requested
+    if (searchType === 'lead' || searchType === 'both') {
+      console.log(`🔍 Searching leads for "${name}" (client: ${clientId})`);
+      
+      const { data: leads, error: leadError } = await supabase
+        .schema('lead_dialer')
+        .from('leads')
+        .select('id, full_name, first_name, last_name, email, phone_number, company, client_id')
+        .eq('client_id', parseInt(clientId))
+        .eq('is_active', true);
+
+      if (leadError) {
+        console.error('Error fetching leads:', leadError);
+      } else if (leads) {
+        const leadContacts = leads.map(lead => ({
+          id: lead.id,
+          full_name: lead.full_name || `${lead.first_name || ''} ${lead.last_name || ''}`.trim(),
+          email: lead.email,
+          phone_number: lead.phone_number,
+          company: lead.company,
+          source: 'lead' as const
+        })).filter(contact => contact.email); // Only include contacts with email
+
+        allContacts.push(...leadContacts);
+        console.log(`📊 Found ${leadContacts.length} leads with emails`);
+      }
+    }
+
+    if (allContacts.length === 0) {
+      console.log(`❌ No contacts found in ${searchType} for client ${clientId}`);
+      return { found: false };
+    }
+
+    // Perform fuzzy search
+    const fuse = new Fuse(allContacts, {
+      keys: ['full_name', 'first_name', 'last_name'], // Search multiple name fields
+      threshold: 0.4, // Slightly stricter than customer-only search
+      includeScore: true
+    });
+
+    const searchResults = fuse.search(name);
+    
+    if (searchResults.length > 0) {
+      const bestMatch = searchResults[0];
+      console.log(`✅ Best match found:`, {
+        score: bestMatch.score,
+        contact: bestMatch.item,
+        searchType
+      });
+
+      return {
+        found: true,
+        contact: bestMatch.item,
+        score: bestMatch.score
+      };
+    }
+
+    console.log(`❌ No fuzzy matches found for "${name}" in ${searchType}`);
+    return { found: false };
+
+  } catch (error) {
+    console.error(`❌ Contact search error:`, error);
+    return { found: false };
+  }
+};
+
 export const getAgentWithFuzzySearch = async (name: string) => {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
