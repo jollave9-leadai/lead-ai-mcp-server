@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createMcpHandler } from "mcp-handler";
 import { FinalOptimizedCalendarOperations } from "@/lib/helpers/calendar_functions/finalOptimizedCalendarOperations";
 import {
-  getCustomerWithFuzzySearch, 
+  getContactWithFuzzySearch,
   getAgentByCalendarConnection, 
   isWithinOfficeHours 
 } from "@/lib/helpers/utils";
@@ -15,7 +15,7 @@ const handler = createMcpHandler((server) => {
   // CreateCalendarEvent - Main booking tool for customers
   server.tool(
     "CreateCalendarEvent",
-    "Book a new appointment with an agent. Automatically checks for conflicts, validates office hours, and sends email invitations. For VAPI: Use {{now}} variable for datetime formatting.",
+    "Book a new appointment with an agent. Searches both customers and leads database, checks for conflicts, validates office hours, and sends email invitations. Ideal for inbound/outbound AI agents. For VAPI: Use {{now}} variable for datetime formatting.",
     {
       clientId: z
         .union([z.number(), z.string().transform(Number)])
@@ -27,19 +27,28 @@ const handler = createMcpHandler((server) => {
       endDateTime: z
         .string()
         .describe("End time in ISO format: '2025-10-15T15:00:00'. For VAPI: Use {{now}} variable (e.g., {{now.plus({days: 1}).set({hour: 15, minute: 0}).toISO()}})"),
-      customerName: z
+      contactName: z
         .string()
         .optional()
-        .describe("Customer name to search in database: 'John Smith' (finds email automatically)"),
+        .describe("Contact name to search in database: 'John Smith' (searches both customers and leads automatically)"),
+      contactPhone: z
+        .string()
+        .optional()
+        .describe("Contact phone number: '+1234567890' (useful for inbound/outbound call context)"),
       attendeeEmail: z
         .string()
         .email()
         .optional()
-        .describe("Attendee email: 'john@company.com' (required if customer not found in database)"),
+        .describe("Attendee email: 'john@company.com' (required if contact not found in database)"),
       attendeeName: z
         .string()
         .optional()
-        .describe("Attendee display name: 'John Smith' (auto-filled from customer database)"),
+        .describe("Attendee display name: 'John Smith' (auto-filled from contact database)"),
+      searchType: z
+        .enum(['customer', 'lead', 'both'])
+        .optional()
+        .default('both')
+        .describe("Where to search for contact: 'customer' (existing customers), 'lead' (prospects), 'both' (default)"),
       description: z
         .string()
         .optional()
@@ -65,9 +74,11 @@ const handler = createMcpHandler((server) => {
           subject,
           startDateTime,
           endDateTime,
-          customerName,
+          contactName,
+          contactPhone,
           attendeeEmail,
           attendeeName,
+          searchType,
           description,
           location,
           isOnlineMeeting,
@@ -92,58 +103,60 @@ const handler = createMcpHandler((server) => {
           };
         }
 
-        // Customer lookup logic
+        // Contact lookup logic (searches both customers and leads)
         let finalAttendeeEmail = attendeeEmail;
         let finalAttendeeName = attendeeName;
-        let customerFound = false;
+        let contactFound = false;
+        let contactSource = '';
 
-        // If customerName is provided, search in customer database first
-        if (customerName) {
-          console.log(`🔍 Searching for customer: "${customerName}" for client ${numericClientId}`);
+        // If contactName is provided, search in database
+        if (contactName) {
+          console.log(`🔍 Searching for contact: "${contactName}" for client ${numericClientId} (type: ${searchType})`);
           
           try {
-            const customerResults = await getCustomerWithFuzzySearch(customerName, numericClientId.toString());
+            const contactResult = await getContactWithFuzzySearch(contactName, numericClientId.toString(), searchType);
             
-            if (customerResults && customerResults.length > 0) {
-              const bestMatch = customerResults[0];
-              const customer = bestMatch.item;
+            if (contactResult.found && contactResult.contact) {
+              const contact = contactResult.contact;
               
-              console.log(`✅ Found customer match:`, {
-                score: bestMatch.score,
-                customer: {
-                  id: customer.id,
-                  full_name: customer.full_name,
-                  email: customer.email,
-                  company: customer.company
+              console.log(`✅ Found contact match:`, {
+                score: contactResult.score,
+                contact: {
+                  id: contact.id,
+                  full_name: contact.full_name,
+                  email: contact.email,
+                  company: contact.company,
+                  source: contact.source
                 }
               });
 
-              if (customer.email) {
-                finalAttendeeEmail = customer.email;
-                finalAttendeeName = customer.full_name || attendeeName;
-                customerFound = true;
+              if (contact.email) {
+                finalAttendeeEmail = contact.email;
+                finalAttendeeName = contact.full_name || attendeeName;
+                contactFound = true;
+                contactSource = contact.source;
                 
-                console.log(`📧 Using customer email: ${finalAttendeeEmail} (${finalAttendeeName})`);
+                console.log(`📧 Using ${contact.source} email: ${finalAttendeeEmail} (${finalAttendeeName})`);
               } else {
-                console.log(`⚠️ Customer found but no email address available`);
+                console.log(`⚠️ Contact found but no email address available`);
               }
             } else {
-              console.log(`❌ No customer found matching: "${customerName}"`);
+              console.log(`❌ No contact found matching: "${contactName}" in ${searchType}`);
             }
           } catch (error) {
-            console.error('Error searching for customer:', error);
+            console.error('Error searching for contact:', error);
           }
         }
 
         // Validate that we have an email address
         if (!finalAttendeeEmail) {
           let errorMessage = "";
-          if (customerName && !customerFound) {
-            errorMessage = `Customer "${customerName}" not found in database. Please provide attendeeEmail manually, or check the customer name spelling.`;
-          } else if (customerName && customerFound) {
-            errorMessage = `Customer "${customerName}" found but has no email address. Please provide attendeeEmail manually.`;
+          if (contactName && !contactFound) {
+            errorMessage = `Contact "${contactName}" not found in ${searchType === 'both' ? 'customers or leads' : searchType} database. Please provide attendeeEmail manually, or check the contact name spelling.`;
+          } else if (contactName && contactFound) {
+            errorMessage = `Contact "${contactName}" found but has no email address. Please provide attendeeEmail manually.`;
           } else {
-            errorMessage = "Either customerName (to search database) or attendeeEmail is required.";
+            errorMessage = "Either contactName (to search database) or attendeeEmail is required for booking.";
           }
 
           return {
@@ -304,7 +317,14 @@ const handler = createMcpHandler((server) => {
 
         let successText = `Perfect! I've successfully booked your appointment.\n\n`;
         successText += `✅ Appointment Confirmed\n\n`;
-        successText += `• Customer: ${finalAttendeeName || finalAttendeeEmail}\n`;
+        successText += `• Contact: ${finalAttendeeName || finalAttendeeEmail}`;
+        if (contactFound && contactSource) {
+          successText += ` (${contactSource === 'lead' ? 'Lead' : 'Customer'})`;
+        }
+        successText += `\n`;
+        if (contactPhone) {
+          successText += `• Phone: ${contactPhone}\n`;
+        }
         successText += `• Type: ${subject}\n`;
         successText += `• Date & Time: ${eventTime}\n`;
         successText += `• Meeting: ${isOnlineMeeting ? 'Online Teams meeting' : 'In-person'}\n`;
