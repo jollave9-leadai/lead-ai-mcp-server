@@ -65,10 +65,46 @@ export class SimplifiedBookingService {
       const lower = dateTimeRequest.toLowerCase().trim()
       
       console.log(`🕐 Parsing "${dateTimeRequest}" in timezone ${clientTimezone}`)
+      console.log(`🕐 Current time in ${clientTimezone}: ${nowInClientTZ.toISO()}`)
+      
+      // Handle ISO format: "2025-10-15T14:00:00" or "2025-10-15T14:00:00.000Z"
+      if (dateTimeRequest.includes('T')) {
+        console.log(`🔍 Detected ISO format`)
+        
+        // Try parsing as ISO and interpret in client timezone
+        let parsed: DateTime
+        
+        if (dateTimeRequest.endsWith('Z') || dateTimeRequest.includes('+') || dateTimeRequest.includes('-', 10)) {
+          // Has timezone info, convert to client timezone
+          parsed = DateTime.fromISO(dateTimeRequest).setZone(clientTimezone)
+          console.log(`🌍 Converting from UTC/other timezone to ${clientTimezone}`)
+        } else {
+          // No timezone info, assume it's in client timezone
+          parsed = DateTime.fromISO(dateTimeRequest, { zone: clientTimezone })
+          console.log(`🏠 Interpreting as ${clientTimezone} time`)
+        }
+        
+        if (parsed.isValid) {
+          const startDateTime = parsed.toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
+          const endDateTime = parsed.plus({ minutes: 60 }).toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
+          
+          console.log(`✅ ISO format parsed: ${startDateTime} (${parsed.toFormat('DDD h:mm a')})`)
+          return {
+            success: true,
+            startDateTime,
+            endDateTime,
+            duration: 60,
+            description: `${parsed.toFormat('DDD')} at ${parsed.toFormat('h:mm a')}`
+          }
+        } else {
+          console.log(`❌ Invalid ISO format: ${parsed.invalidReason}`)
+        }
+      }
       
       // Handle VAPI format: "14/10/2025, 03:42 pm"
       const vapiMatch = lower.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})\s*(am|pm)/i)
       if (vapiMatch) {
+        console.log(`🔍 Detected VAPI format`)
         const [, day, month, year, hour, minute, ampm] = vapiMatch
         const hour24 = ampm.toLowerCase() === 'pm' && parseInt(hour) !== 12 
           ? parseInt(hour) + 12 
@@ -88,7 +124,7 @@ export class SimplifiedBookingService {
           const startDateTime = parsed.toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
           const endDateTime = parsed.plus({ minutes: 60 }).toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
           
-          console.log(`✅ VAPI format parsed: ${startDateTime}`)
+          console.log(`✅ VAPI format parsed: ${startDateTime} (${parsed.toFormat('DDD h:mm a')})`)
           return {
             success: true,
             startDateTime,
@@ -102,10 +138,13 @@ export class SimplifiedBookingService {
       // Handle natural language: "today at 3pm", "tomorrow at 2pm"
       const timeMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i)
       if (timeMatch) {
+        console.log(`🔍 Detected natural language format`)
         const hour = parseInt(timeMatch[1])
         const minute = timeMatch[2] ? parseInt(timeMatch[2]) : 0
         const isPM = timeMatch[3].toLowerCase() === 'pm'
         const adjustedHour = isPM && hour !== 12 ? hour + 12 : (hour === 12 && !isPM ? 0 : hour)
+        
+        console.log(`🕐 Time parsing: ${hour}:${minute} ${isPM ? 'PM' : 'AM'} → ${adjustedHour}:${minute} (24h)`)
         
         let targetDate: DateTime
         let dayDescription: string
@@ -125,7 +164,7 @@ export class SimplifiedBookingService {
         const startDateTime = result.toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
         const endDateTime = result.plus({ minutes: 60 }).toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
         
-        console.log(`✅ Natural language parsed: ${startDateTime}`)
+        console.log(`✅ Natural language parsed: ${startDateTime} (${result.toFormat('DDD h:mm a')})`)
         return {
           success: true,
           startDateTime,
@@ -135,9 +174,10 @@ export class SimplifiedBookingService {
         }
       }
       
+      console.log(`❌ No matching format found for: "${dateTimeRequest}"`)
       return {
         success: false,
-        error: `Could not parse date/time format: "${dateTimeRequest}"`
+        error: `Could not parse date/time format: "${dateTimeRequest}". Please provide time like "tomorrow at 2pm", "2025-10-15T14:00:00", or "15/10/2025, 2:00 pm"`
       }
       
     } catch (error) {
@@ -339,7 +379,7 @@ export class SimplifiedBookingService {
     callContext,
     appointmentType,
     preferredDateTime,
-    duration = 60,
+    duration = 60, // Currently hardcoded to 60min in parseDateTime, parameter reserved for future use
     notes,
     isOnlineMeeting = true,
     location
@@ -528,7 +568,7 @@ export class SimplifiedBookingService {
     dateRequest,
     startDate,
     endDate,
-    duration = 60, // eslint-disable-line @typescript-eslint/no-unused-vars
+    duration = 60,
     maxSlots = 10
   }: {
     clientId: number
@@ -548,15 +588,40 @@ export class SimplifiedBookingService {
   }> {
     try {
       console.log(`🔍 SIMPLIFIED AVAILABILITY CHECK for client ${clientId}`)
+      console.log(`   dateRequest: "${dateRequest}"`)
+      console.log(`   startDate: "${startDate}"`)
+      console.log(`   endDate: "${endDate}"`)
+      
+      // Fix date range logic
+      let finalStartDate: string
+      let finalEndDate: string
+      
+      if (startDate && endDate) {
+        // Both dates provided
+        finalStartDate = startDate
+        finalEndDate = endDate
+      } else if (dateRequest) {
+        // Natural language date request - use same date for both start and end
+        finalStartDate = dateRequest
+        finalEndDate = dateRequest
+      } else {
+        // Default to today
+        finalStartDate = 'today'
+        finalEndDate = 'today'
+      }
+      
+      console.log(`   Using date range: "${finalStartDate}" to "${finalEndDate}"`)
       
       // Use existing implementation
       const result = await FinalOptimizedCalendarOperations.findAvailableSlotsForClient(
         clientId,
-        startDate || dateRequest || 'today',
-        endDate || 'today',
+        finalStartDate,
+        finalEndDate,
         duration,
         maxSlots
       )
+      
+      console.log(`   Found ${result.availableSlots?.length || 0} available slots`)
       
       return {
         success: true,
