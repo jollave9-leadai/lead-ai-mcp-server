@@ -1,104 +1,296 @@
 import { z } from "zod";
 import { createMcpHandler } from "mcp-handler";
-import { SimplifiedBookingService } from "@/lib/helpers/booking/simplifiedBookingService";
+import { FinalOptimizedCalendarOperations } from "@/lib/helpers/calendar_functions/finalOptimizedCalendarOperations";
+import {
+  getCustomerWithFuzzySearch, 
+  getAgentByCalendarConnection, 
+  isWithinOfficeHours 
+} from "@/lib/helpers/utils";
+import type {
+  CreateGraphEventMCPRequest,
+  GetAvailabilityRequest,
+} from "@/types";
 
 const handler = createMcpHandler((server) => {
-  // BookAppointment - Main booking tool with smart slot suggestions
+  // CreateCalendarEvent - Main booking tool for customers
   server.tool(
-    "BookAppointment",
-    "Book an appointment with an agent. Automatically suggests alternative slots if requested time is unavailable.",
+    "CreateCalendarEvent",
+    "Book a new appointment with an agent. Automatically checks for conflicts, validates office hours, and sends email invitations. For VAPI: Use {{now}} variable for datetime formatting.",
     {
       clientId: z
         .union([z.number(), z.string().transform(Number)])
         .describe("Client ID number (e.g., 10000001)"),
+      subject: z.string().describe("Meeting title (e.g., 'Sales Call with John Smith')"),
+      startDateTime: z
+        .string()
+        .describe("Start time in ISO format: '2025-10-15T14:00:00'. For VAPI: Use {{now}} variable (e.g., {{now.plus({days: 1}).set({hour: 14, minute: 0}).toISO()}})"),
+      endDateTime: z
+        .string()
+        .describe("End time in ISO format: '2025-10-15T15:00:00'. For VAPI: Use {{now}} variable (e.g., {{now.plus({days: 1}).set({hour: 15, minute: 0}).toISO()}})"),
       customerName: z
         .string()
-        .describe("Customer's full name: 'John Smith' or 'Jane Doe'"),
-      customerEmail: z
+        .optional()
+        .describe("Customer name to search in database: 'John Smith' (finds email automatically)"),
+      attendeeEmail: z
         .string()
         .email()
         .optional()
-        .describe("Customer's email address (optional if customer exists in system)"),
-      customerPhone: z
+        .describe("Attendee email: 'john@company.com' (required if customer not found in database)"),
+      attendeeName: z
         .string()
         .optional()
-        .describe("Customer's phone number (recommended for outbound calls)"),
-      callContext: z
+        .describe("Attendee display name: 'John Smith' (auto-filled from customer database)"),
+      description: z
         .string()
         .optional()
-        .describe("Context from the call: 'Interested in premium package', 'Follow-up from previous demo' (optional)"),
-      appointmentType: z
-        .string()
-        .describe("Type of appointment: 'Sales Call', 'Consultation', 'Follow-up', 'Demo'"),
-      preferredDateTime: z
-        .string()
-        .describe("Preferred date and time in ISO format: '2025-10-15T14:00:00'. For VAPI: Use {{now}} variable to calculate relative times (e.g., for 'tomorrow at 2pm', use {{now.plus({days: 1}).set({hour: 14, minute: 0}).toISO()}})"),
-      duration: z
-        .number()
-        .default(60)
-        .describe("Appointment duration in minutes (default: 60)"),
-      notes: z
-        .string()
-        .optional()
-        .describe("Additional notes or requirements for the appointment"),
-      isOnlineMeeting: z
-        .boolean()
-        .default(true)
-        .describe("Create Teams meeting: true for online, false for in-person (default: true)"),
+        .describe("Meeting description or notes (optional)"),
       location: z
         .string()
         .optional()
-        .describe("Meeting location if in-person, or additional location details"),
+        .describe("Meeting location: 'Conference Room A' or address (optional)"),
+      isOnlineMeeting: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe("Create Teams meeting: true/false (default: true)"),
+      calendarId: z
+        .string()
+        .optional()
+        .describe("Calendar ID (optional, uses primary calendar if not specified)"),
     },
     async (input) => {
-      const { 
-        clientId, 
-        customerName, 
-        customerEmail, 
-        customerPhone,
-        callContext,
-        appointmentType, 
-        preferredDateTime, 
-        duration, 
-        notes, 
-        isOnlineMeeting, 
-        location 
-      } = input;
+      try {
+        const {
+          clientId,
+          subject,
+          startDateTime,
+          endDateTime,
+          customerName,
+          attendeeEmail,
+          attendeeName,
+          description,
+          location,
+          isOnlineMeeting,
+          calendarId,
+        } = input;
+        
+        console.log("📅 Customer booking request (CreateCalendarEvent)");
+        console.table(input);
+        
+        // Convert and validate clientId
+        const numericClientId =
+          typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
 
-      console.log("📅 Customer booking request");
-      console.table(input);
+        if (!numericClientId || isNaN(numericClientId)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "❌ Invalid client ID. Please provide a valid client ID number.",
+              },
+            ],
+          };
+        }
 
-      const numericClientId = typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+        // Customer lookup logic
+        let finalAttendeeEmail = attendeeEmail;
+        let finalAttendeeName = attendeeName;
+        let customerFound = false;
 
-      if (!numericClientId || isNaN(numericClientId)) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "❌ **Booking Failed**\n\nInvalid client ID. Please provide a valid client ID number.",
-            },
-          ],
+        // If customerName is provided, search in customer database first
+        if (customerName) {
+          console.log(`🔍 Searching for customer: "${customerName}" for client ${numericClientId}`);
+          
+          try {
+            const customerResults = await getCustomerWithFuzzySearch(customerName, numericClientId.toString());
+            
+            if (customerResults && customerResults.length > 0) {
+              const bestMatch = customerResults[0];
+              const customer = bestMatch.item;
+              
+              console.log(`✅ Found customer match:`, {
+                score: bestMatch.score,
+                customer: {
+                  id: customer.id,
+                  full_name: customer.full_name,
+                  email: customer.email,
+                  company: customer.company
+                }
+              });
+
+              if (customer.email) {
+                finalAttendeeEmail = customer.email;
+                finalAttendeeName = customer.full_name || attendeeName;
+                customerFound = true;
+                
+                console.log(`📧 Using customer email: ${finalAttendeeEmail} (${finalAttendeeName})`);
+              } else {
+                console.log(`⚠️ Customer found but no email address available`);
+              }
+            } else {
+              console.log(`❌ No customer found matching: "${customerName}"`);
+            }
+          } catch (error) {
+            console.error('Error searching for customer:', error);
+          }
+        }
+
+        // Validate that we have an email address
+        if (!finalAttendeeEmail) {
+          let errorMessage = "";
+          if (customerName && !customerFound) {
+            errorMessage = `Customer "${customerName}" not found in database. Please provide attendeeEmail manually, or check the customer name spelling.`;
+          } else if (customerName && customerFound) {
+            errorMessage = `Customer "${customerName}" found but has no email address. Please provide attendeeEmail manually.`;
+          } else {
+            errorMessage = "Either customerName (to search database) or attendeeEmail is required.";
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ ${errorMessage}`,
+              },
+            ],
+          };
+        }
+
+        // Validate that the booking is not in the past
+        console.log(`🕐 Validating booking time is not in the past...`)
+        
+        const now = new Date()
+        const requestedStart = new Date(startDateTime)
+        const minimumAdvanceMinutes = 15 // Minimum 15 minutes in advance
+        const minimumBookingTime = new Date(now.getTime() + minimumAdvanceMinutes * 60 * 1000)
+        
+        const timeDifference = Math.floor((requestedStart.getTime() - now.getTime()) / (1000 * 60))
+        
+        if (requestedStart <= minimumBookingTime) {
+          const errorMessage = timeDifference <= 0 
+            ? `Cannot book in the past. Earliest available: ${minimumBookingTime.toLocaleString()}`
+            : `Minimum ${minimumAdvanceMinutes} minutes advance required. Earliest available: ${minimumBookingTime.toLocaleString()}`
+          
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ ${errorMessage}`,
+              },
+            ],
+          }
+        }
+        
+        console.log(`✅ Booking time is valid (${timeDifference} minutes in the future)`)
+
+        // Get calendar connection to find assigned agent and office hours
+        console.log(`🏢 Checking office hours for calendar booking...`);
+        
+        // We need to get the calendar connection ID first
+        const { getCalendarConnectionByClientId } = await import("@/lib/helpers/calendar_functions");
+        const connection = await getCalendarConnectionByClientId(numericClientId);
+        
+        if (!connection) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "❌ No calendar connection found for this client. Please connect a Microsoft calendar first.",
+              },
+            ],
+          };
+        }
+
+        // Get agent assigned to this calendar connection
+        const agentAssignment = await getAgentByCalendarConnection(connection.id, numericClientId);
+        
+        if (agentAssignment && agentAssignment.agents) {
+          const agent = agentAssignment.agents as unknown as {
+            id: number;
+            name: string;
+            profiles: {
+              id: number;
+              name: string;
+              office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+              timezone: string;
+            } | {
+              id: number;
+              name: string;
+              office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+              timezone: string;
+            }[];
+          };
+          
+          const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles;
+          // Check if the requested time is within office hours
+          const officeHoursCheck = isWithinOfficeHours(
+            startDateTime, 
+            profile.office_hours, 
+            profile.timezone || 'Australia/Melbourne'
+          );
+          
+          if (!officeHoursCheck.isWithin) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `❌ ${officeHoursCheck.reason} (Agent: ${agent.name})`,
+                },
+              ],
+            };
+          }
+          
+          console.log(`✅ Requested time is within office hours for agent ${agent.name}`);
+        } else {
+          console.log(`⚠️ No agent assignment found for calendar connection. Proceeding without office hours validation.`);
+        }
+
+        const request: CreateGraphEventMCPRequest = {
+          clientId: numericClientId,
+          subject,
+          startDateTime,
+          endDateTime,
+          attendeeEmail: finalAttendeeEmail,
+          attendeeName: finalAttendeeName,
+          description,
+          location,
+          isOnlineMeeting,
+          calendarId,
         };
-      }
 
-      // Use the simplified booking service
-      const result = await SimplifiedBookingService.bookAppointment({
-        clientId: numericClientId,
-        customerName,
-        customerEmail,
-        customerPhone,
-        callContext,
-        appointmentType,
-        preferredDateTime,
-        duration,
-        notes,
-        isOnlineMeeting,
-        location
-      });
+        const result = await FinalOptimizedCalendarOperations.createCalendarEventForClient(numericClientId, request);
 
-      if (result.success) {
-        // VAPI-friendly success response - concise and voice-optimized
-        const eventTime = result.event?.start?.dateTime 
+        if (!result.success) {
+          // Check if it's a conflict with suggested slots
+          if (result.availableSlots && result.availableSlots.length > 0) {
+            let conflictText = `That time slot isn't available. Here are some alternative times:\n\n`;
+            result.availableSlots.slice(0, 3).forEach((slot, index) => {
+              conflictText += `${index + 1}. ${slot.startFormatted}\n`;
+            });
+            conflictText += `\nWhich of these times works better for you?`;
+            
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: conflictText,
+                },
+              ],
+            };
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ Booking failed: ${result.error}`,
+              },
+            ],
+          };
+        }
+
+        // Success response - VAPI optimized
+        const eventTime = result.event?.start.dateTime 
           ? new Date(result.event.start.dateTime).toLocaleString('en-US', {
               weekday: 'long',
               year: 'numeric',
@@ -110,16 +302,15 @@ const handler = createMcpHandler((server) => {
             })
           : 'the requested time';
 
-        let successText = `Perfect! I've successfully booked your appointment. Here are the details:\n\n`;
+        let successText = `Perfect! I've successfully booked your appointment.\n\n`;
         successText += `✅ Appointment Confirmed\n\n`;
-        successText += `• Customer: ${customerName}\n`;
-        successText += `• Email: ${result.event?.start?.dateTime ? 'confirmation sent' : 'will be sent'}\n`;
-        successText += `• Type: ${appointmentType}\n`;
-        successText += `• Date & Time: ${eventTime} (${duration} hour duration)\n`;
-        successText += `• Meeting: Online Teams meeting\n`;
+        successText += `• Customer: ${finalAttendeeName || finalAttendeeEmail}\n`;
+        successText += `• Type: ${subject}\n`;
+        successText += `• Date & Time: ${eventTime}\n`;
+        successText += `• Meeting: ${isOnlineMeeting ? 'Online Teams meeting' : 'In-person'}\n`;
         
         if (result.event?.onlineMeeting?.joinUrl) {
-          successText += `• Meeting Link: Join Teams Meeting\n`;
+          successText += `• Meeting Link: Available in calendar invite\n`;
         }
         
         successText += `\nConfirmation emails have been sent to all participants.`;
@@ -132,17 +323,338 @@ const handler = createMcpHandler((server) => {
             },
           ],
         };
-      } else {
-        // VAPI-friendly error responses
-        if (result.availableSlots && result.availableSlots.length > 0) {
-          let responseText = `I'm sorry, that time slot isn't available. ${result.error}\n\n`;
-          responseText += `Here are some alternative times I found:\n\n`;
+      } catch (error) {
+        console.error("Error in CreateCalendarEvent:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `❌ Error creating appointment: ${
+                error instanceof Error ? error.message : "Unknown error"
+              }`,
+            },
+          ],
+        };
+      }
+    }
+  );
 
-          result.availableSlots.slice(0, 3).forEach((slot, index) => {
-            responseText += `${index + 1}. ${slot.startFormatted}\n`;
+  // FindAvailableSlots - Check availability and suggest alternatives
+  server.tool(
+    "FindAvailableSlots",
+    "Check availability and suggest alternative time slots. Considers existing appointments and office hours. For VAPI: Use {{now}} variable for datetime formatting.",
+    {
+      clientId: z
+        .union([z.number(), z.string().transform(Number)])
+        .describe("Client ID number (e.g., 10000001)"),
+      requestedStartTime: z
+        .string()
+        .describe("Preferred start time in ISO format: '2025-10-15T14:00:00'. For VAPI: Use {{now}} variable"),
+      requestedEndTime: z
+        .string()
+        .describe("Preferred end time in ISO format: '2025-10-15T15:00:00'. For VAPI: Use {{now}} variable"),
+      durationMinutes: z
+        .number()
+        .optional()
+        .default(60)
+        .describe("Meeting duration in minutes: 30, 60, 90 (default: 60)"),
+      maxSuggestions: z
+        .number()
+        .optional()
+        .default(5)
+        .describe("Number of alternative slots to suggest: 3-10 (default: 5)"),
+    },
+    async (input) => {
+      try {
+        const {
+          clientId,
+          requestedStartTime,
+          requestedEndTime,
+          durationMinutes,
+          maxSuggestions,
+        } = input;
+        
+        console.log("🔍 Customer checking availability (FindAvailableSlots)");
+        console.table(input);
+
+        // Convert and validate clientId
+        const numericClientId =
+          typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+
+        if (!numericClientId || isNaN(numericClientId)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "❌ Invalid client ID. Please provide a valid client ID number.",
+              },
+            ],
+          };
+        }
+
+        const result = await FinalOptimizedCalendarOperations.findAvailableSlotsForClient(
+          numericClientId,
+          requestedStartTime,
+          requestedEndTime,
+          durationMinutes || 60,
+          maxSuggestions || 5
+        );
+
+        if (!result.success) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ Error finding available slots: ${result.error}`,
+              },
+            ],
+          };
+        }
+
+        const requestedTime = new Date(requestedStartTime).toLocaleString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        });
+
+        if (!result.hasConflict) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `✅ Great news! Your requested time (${requestedTime}) is available and can be booked immediately.`,
+              },
+            ],
+          };
+        } else {
+          let responseText = `I'm sorry, ${requestedTime} isn't available.`;
+          
+          if (result.availableSlots && result.availableSlots.length > 0) {
+            responseText += ` Here are some alternative times I found:\n\n`;
+            
+            result.availableSlots.slice(0, 3).forEach((slot, index) => {
+              responseText += `${index + 1}. ${slot.startFormatted}\n`;
+            });
+            
+            responseText += `\nWhich of these times works better for you?`;
+          } else {
+            responseText += ` Unfortunately, I couldn't find any alternative slots within business hours. Please try a different date.`;
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: responseText,
+              },
+            ],
+          };
+        }
+      } catch (error) {
+        console.error("Error in FindAvailableSlots:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ Error finding available slots: ${
+                  error instanceof Error ? error.message : "Unknown error"
+                }`,
+              },
+            ],
+          };
+      }
+    }
+  );
+
+  // GetAvailability - Check detailed availability information
+  server.tool(
+    "GetAvailability",
+    "Check when people are free or busy. Shows detailed availability information for scheduling. For VAPI: Use {{now}} variable for datetime formatting.",
+    {
+      clientId: z
+        .union([z.number(), z.string().transform(Number)])
+        .describe("Client ID number (e.g., 10000001)"),
+      startDate: z
+        .string()
+        .describe("Check from in ISO format: '2025-10-15T09:00:00'. For VAPI: Use {{now}} variable"),
+      endDate: z
+        .string()
+        .describe("Check until in ISO format: '2025-10-15T17:00:00'. For VAPI: Use {{now}} variable"),
+      emails: z
+        .array(z.string().email())
+        .optional()
+        .describe("Email addresses to check: ['john@company.com'] (optional, uses client email if not provided)"),
+      intervalInMinutes: z
+        .number()
+        .optional()
+        .describe("Time slot intervals: 15, 30, 60 minutes (default: 60)"),
+    },
+    async (input) => {
+      try {
+        const {
+          clientId,
+          startDate,
+          endDate,
+          emails,
+          intervalInMinutes,
+        } = input;
+        
+        console.log("📊 Customer checking detailed availability (GetAvailability)");
+        console.table(input);
+
+        // Convert and validate clientId
+        const numericClientId =
+          typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+
+        if (!numericClientId || isNaN(numericClientId)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "❌ Invalid client ID. Please provide a valid client ID number.",
+              },
+            ],
+          };
+        }
+
+        const request: GetAvailabilityRequest = {
+          clientId: numericClientId,
+          startDate,
+          endDate,
+          emails,
+          intervalInMinutes,
+        };
+
+        const result = await FinalOptimizedCalendarOperations.getAvailabilityForClient(numericClientId, request);
+
+        if (!result.success) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ Error retrieving availability: ${result.error}`,
+              },
+            ],
+          };
+        }
+
+        const dateRange = `${new Date(startDate).toLocaleDateString("en-US")} - ${new Date(endDate).toLocaleDateString("en-US")}`;
+
+        if (!result.availability || result.availability.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `✅ Great news! No busy times found for ${dateRange}. All requested time slots appear to be available for booking.`,
+              },
+            ],
+          };
+        } else {
+          let responseText = `📊 Availability for ${dateRange}:\n\n`;
+
+          result.availability.forEach((person) => {
+            responseText += `👤 ${person.email}:\n`;
+            
+            if (person.availability.length === 0) {
+              responseText += `   ✅ Available for the entire period\n`;
+            } else {
+              person.availability.forEach((slot, index) => {
+                const startTime = new Date(slot.start).toLocaleString("en-US");
+                const endTime = new Date(slot.end).toLocaleString("en-US");
+                responseText += `   ${index + 1}. ${slot.status.toUpperCase()}: ${startTime} - ${endTime}\n`;
+              });
+            }
+            responseText += `\n`;
           });
 
-          responseText += `\nWhich of these times works better for you?`;
+          return {
+            content: [
+              {
+                type: "text",
+                text: responseText,
+              },
+            ],
+          };
+        }
+      } catch (error) {
+        console.error("Error in GetAvailability:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `❌ Error retrieving availability: ${
+                error instanceof Error ? error.message : "Unknown error"
+              }`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // CheckCalendarConnection - Verify calendar connection
+  server.tool(
+    "CheckCalendarConnection",
+    "Verify if a client has Microsoft calendar connected. Shows connection status and details.",
+    {
+      clientId: z
+        .union([z.number(), z.string().transform(Number)])
+        .describe("Client ID number (e.g., 10000001)"),
+    },
+    async (input) => {
+      try {
+        const { clientId } = input;
+        
+        console.log("🔗 Customer checking calendar connection");
+        console.table(input);
+
+        // Convert and validate clientId
+        const numericClientId =
+          typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+
+        if (!numericClientId || isNaN(numericClientId)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "❌ Invalid client ID. Please provide a valid client ID number.",
+              },
+            ],
+          };
+        }
+
+        const summary = await FinalOptimizedCalendarOperations.checkClientCalendarConnection(numericClientId);
+
+        if (!summary) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ Could not retrieve calendar connection information for client ${numericClientId}`,
+              },
+            ],
+          };
+        }
+
+        if (summary.connected) {
+          let responseText = `✅ Calendar is connected and ready for booking!\n\n`;
+          
+          if (summary.connectionDetails) {
+            const details = summary.connectionDetails;
+            responseText += `📧 Connected Account: ${details.userEmail}\n`;
+            responseText += `👤 User: ${details.userName}\n`;
+            responseText += `📅 Connected: ${new Date(details.connectedAt).toLocaleDateString()}\n`;
+            
+            if (details.calendarsCount !== undefined) {
+              responseText += `📊 Available Calendars: ${details.calendarsCount}\n`;
+            }
+          }
+          
+          responseText += `\nYou can now book appointments through this system.`;
 
           return {
             content: [
@@ -153,122 +665,125 @@ const handler = createMcpHandler((server) => {
             ],
           };
         } else {
-          // No alternatives available
+          let responseText = `❌ Calendar not connected\n\n`;
+          if (summary.error) {
+            responseText += `Error: ${summary.error}\n\n`;
+          }
+          responseText += `Please connect your Microsoft calendar before booking appointments.`;
+
           return {
             content: [
               {
                 type: "text",
-                text: `I'm sorry, I couldn't book that appointment. ${result.error} ${result.suggestedAction || 'Please try a different time or let me know how I can help.'}`,
+                text: responseText,
               },
             ],
           };
         }
+      } catch (error) {
+        console.error("Error in CheckCalendarConnection:", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `❌ Error checking calendar connection: ${
+                error instanceof Error ? error.message : "Unknown error"
+              }`,
+            },
+          ],
+        };
       }
     }
   );
 
-  // CheckAvailability - Check available time slots
+  // GetCalendars - List available calendars
   server.tool(
-    "CheckAvailability",
-    "Check available appointment slots for a specific date or date range",
+    "GetCalendars",
+    "List all available calendars for a client. Shows primary and secondary calendars.",
     {
       clientId: z
         .union([z.number(), z.string().transform(Number)])
         .describe("Client ID number (e.g., 10000001)"),
-      dateRequest: z
-        .string()
-        .optional()
-        .describe("Date to check in ISO format: '2025-10-15' or '2025-10-15T09:00:00'. For VAPI: Use {{now}} variable (e.g., for 'tomorrow', use {{now.plus({days: 1}).toISODate()}})"),
-      startDate: z
-        .string()
-        .optional()
-        .describe("Start date: '2025-10-15T09:00:00' (use for specific date ranges)"),
-      endDate: z
-        .string()
-        .optional()
-        .describe("End date: '2025-10-15T17:00:00' (use with startDate for date range)"),
-      duration: z
-        .number()
-        .default(60)
-        .describe("Appointment duration in minutes (default: 60)"),
-      maxSlots: z
-        .number()
-        .default(10)
-        .describe("Maximum number of available slots to return (default: 10)"),
     },
     async (input) => {
-      const { clientId, dateRequest, startDate, endDate, duration, maxSlots } = input;
+      try {
+        const { clientId } = input;
+        
+        console.log("📅 Customer checking available calendars");
+        console.table(input);
+        
+        // Convert and validate clientId
+        const numericClientId =
+          typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
 
-      console.log("🔍 Customer checking availability");
-      console.table(input);
+        if (!numericClientId || isNaN(numericClientId)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "❌ Invalid client ID. Please provide a valid client ID number.",
+              },
+            ],
+          };
+        }
 
-      const numericClientId = typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+        const result = await FinalOptimizedCalendarOperations.getCalendarsForClient(numericClientId);
 
-      if (!numericClientId || isNaN(numericClientId)) {
+        if (!result.success) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ Error retrieving calendars: ${result.error}`,
+              },
+            ],
+          };
+        }
+
+        if (!result.calendars || result.calendars.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `📅 No calendars found for client ${numericClientId}. Please check your calendar connection.`,
+              },
+            ],
+          };
+        } else {
+          let responseText = `📅 Available calendars for booking:\n\n`;
+
+          result.calendars.forEach((calendar, index) => {
+            responseText += `${index + 1}. **${calendar.name}**\n`;
+            responseText += `   ${calendar.isDefault ? "✅ Primary Calendar" : "📋 Secondary Calendar"}\n`;
+            responseText += `   Owner: ${calendar.owner}\n`;
+            responseText += `   ID: \`${calendar.id}\`\n\n`;
+          });
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: responseText,
+              },
+            ],
+          };
+        }
+      } catch (error) {
+        console.error("Error in GetCalendars:", error);
         return {
           content: [
             {
               type: "text",
-              text: "❌ **Error**: Invalid client ID. Please provide a valid client ID number.",
+              text: `❌ Error retrieving calendars: ${
+                error instanceof Error ? error.message : "Unknown error"
+              }`,
             },
           ],
         };
       }
-
-      // Use the simplified booking service
-      const result = await SimplifiedBookingService.checkAvailability({
-        clientId: numericClientId,
-        dateRequest,
-        startDate,
-        endDate,
-        duration,
-        maxSlots
-      });
-
-      if (!result.success) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `❌ **Error**: ${result.error}\n\nPlease try again or contact support.`,
-            },
-          ],
-        };
-      }
-
-      if (!result.availableSlots || result.availableSlots.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `I don't see any available appointment slots for that time period. Please try a different date or let me know if you'd like to check another time.`,
-            },
-          ],
-        };
-      }
-
-      // VAPI-friendly available slots response
-      let responseText = `I found ${result.availableSlots.length} available appointment slots:\n\n`;
-
-      result.availableSlots.slice(0, 5).forEach((slot, index) => {
-        responseText += `${index + 1}. ${slot.startFormatted}\n`;
-      });
-
-      responseText += `\nWhich time works best for you?`;
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: responseText,
-          },
-        ],
-      };
     }
   );
 
-},
-{}, 
-{ basePath: "/api/booking"});
+}, {}, { basePath: "/api/booking" });
 
 export { handler as GET, handler as POST };
