@@ -32,7 +32,7 @@ const handler = createMcpHandler((server) => {
         .describe("Type of appointment: 'Sales Call', 'Consultation', 'Follow-up', 'Demo'"),
       preferredDateTime: z
         .string()
-        .describe("Preferred date and time: '2025-10-08T14:00:00' or natural language like 'tomorrow at 2pm'"),
+        .describe("Preferred date and time in ISO format: '2025-10-15T14:00:00'. For VAPI: Use {{now}} variable to calculate relative times (e.g., for 'tomorrow at 2pm', use {{now.plus({days: 1}).set({hour: 14, minute: 0}).toISO()}})"),
       duration: z
         .number()
         .default(60)
@@ -178,15 +178,15 @@ const handler = createMcpHandler((server) => {
       dateRequest: z
         .string()
         .optional()
-        .describe("Natural language date: 'today', 'tomorrow', 'next monday' (optional)"),
+        .describe("Date to check in ISO format: '2025-10-15' or '2025-10-15T09:00:00'. For VAPI: Use {{now}} variable (e.g., for 'tomorrow', use {{now.plus({days: 1}).toISODate()}})"),
       startDate: z
         .string()
         .optional()
-        .describe("Start date: '2025-10-08T09:00:00' (use instead of dateRequest for specific dates)"),
+        .describe("Start date: '2025-10-15T09:00:00' (use for specific date ranges)"),
       endDate: z
         .string()
         .optional()
-        .describe("End date: '2025-10-08T17:00:00' (use with startDate for date range)"),
+        .describe("End date: '2025-10-15T17:00:00' (use with startDate for date range)"),
       duration: z
         .number()
         .default(60)

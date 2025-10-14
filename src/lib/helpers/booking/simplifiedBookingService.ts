@@ -47,7 +47,8 @@ export class SimplifiedBookingService {
   }
   
   /**
-   * STEP 2: Parse date/time in client timezone
+   * STEP 2: Parse date/time - Simplified for VAPI integration
+   * Expects AI agent to provide properly formatted datetime using {{now}} variable
    */
   private static parseDateTime(
     dateTimeRequest: string,
@@ -61,17 +62,13 @@ export class SimplifiedBookingService {
     error?: string
   } {
     try {
-      const nowInClientTZ = DateTime.now().setZone(clientTimezone)
-      const lower = dateTimeRequest.toLowerCase().trim()
-      
       console.log(`🕐 Parsing "${dateTimeRequest}" in timezone ${clientTimezone}`)
-      console.log(`🕐 Current time in ${clientTimezone}: ${nowInClientTZ.toISO()}`)
       
-      // Handle ISO format: "2025-10-15T14:00:00" or "2025-10-15T14:00:00.000Z"
+      // Primary format: ISO datetime (recommended for VAPI)
+      // AI agent should format using {{now}} variable: "2025-10-15T14:00:00"
       if (dateTimeRequest.includes('T')) {
-        console.log(`🔍 Detected ISO format`)
+        console.log(`🔍 Processing ISO format (VAPI recommended)`)
         
-        // Try parsing as ISO and interpret in client timezone
         let parsed: DateTime
         
         if (dateTimeRequest.endsWith('Z') || dateTimeRequest.includes('+') || dateTimeRequest.includes('-', 10)) {
@@ -88,7 +85,7 @@ export class SimplifiedBookingService {
           const startDateTime = parsed.toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
           const endDateTime = parsed.plus({ minutes: 60 }).toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
           
-          console.log(`✅ ISO format parsed: ${startDateTime} (${parsed.toFormat('DDD h:mm a')})`)
+          console.log(`✅ Parsed successfully: ${startDateTime} (${parsed.toFormat('DDD h:mm a')})`)
           return {
             success: true,
             startDateTime,
@@ -101,11 +98,12 @@ export class SimplifiedBookingService {
         }
       }
       
-      // Handle VAPI format: "14/10/2025, 03:42 pm"
-      const vapiMatch = lower.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})\s*(am|pm)/i)
-      if (vapiMatch) {
-        console.log(`🔍 Detected VAPI format`)
-        const [, day, month, year, hour, minute, ampm] = vapiMatch
+      // Fallback: Simple date formats for manual testing
+      // Format: "DD/MM/YYYY, HH:MM AM/PM" (e.g., "15/10/2025, 2:00 PM")
+      const dateTimeMatch = dateTimeRequest.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})\s*(am|pm)/i)
+      if (dateTimeMatch) {
+        console.log(`🔍 Processing fallback format: DD/MM/YYYY, HH:MM AM/PM`)
+        const [, day, month, year, hour, minute, ampm] = dateTimeMatch
         const hour24 = ampm.toLowerCase() === 'pm' && parseInt(hour) !== 12 
           ? parseInt(hour) + 12 
           : (ampm.toLowerCase() === 'am' && parseInt(hour) === 12 ? 0 : parseInt(hour))
@@ -124,7 +122,7 @@ export class SimplifiedBookingService {
           const startDateTime = parsed.toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
           const endDateTime = parsed.plus({ minutes: 60 }).toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
           
-          console.log(`✅ VAPI format parsed: ${startDateTime} (${parsed.toFormat('DDD h:mm a')})`)
+          console.log(`✅ Fallback format parsed: ${startDateTime} (${parsed.toFormat('DDD h:mm a')})`)
           return {
             success: true,
             startDateTime,
@@ -135,49 +133,11 @@ export class SimplifiedBookingService {
         }
       }
       
-      // Handle natural language: "today at 3pm", "tomorrow at 2pm"
-      const timeMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i)
-      if (timeMatch) {
-        console.log(`🔍 Detected natural language format`)
-        const hour = parseInt(timeMatch[1])
-        const minute = timeMatch[2] ? parseInt(timeMatch[2]) : 0
-        const isPM = timeMatch[3].toLowerCase() === 'pm'
-        const adjustedHour = isPM && hour !== 12 ? hour + 12 : (hour === 12 && !isPM ? 0 : hour)
-        
-        console.log(`🕐 Time parsing: ${hour}:${minute} ${isPM ? 'PM' : 'AM'} → ${adjustedHour}:${minute} (24h)`)
-        
-        let targetDate: DateTime
-        let dayDescription: string
-        
-        if (lower.includes('today')) {
-          targetDate = nowInClientTZ
-          dayDescription = 'Today'
-        } else if (lower.includes('tomorrow')) {
-          targetDate = nowInClientTZ.plus({ days: 1 })
-          dayDescription = 'Tomorrow'
-        } else {
-          targetDate = nowInClientTZ
-          dayDescription = 'Today (default)'
-        }
-        
-        const result = targetDate.set({ hour: adjustedHour, minute, second: 0, millisecond: 0 })
-        const startDateTime = result.toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
-        const endDateTime = result.plus({ minutes: 60 }).toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
-        
-        console.log(`✅ Natural language parsed: ${startDateTime} (${result.toFormat('DDD h:mm a')})`)
-        return {
-          success: true,
-          startDateTime,
-          endDateTime,
-          duration: 60,
-          description: `${dayDescription} at ${hour}:${minute.toString().padStart(2, '0')} ${isPM ? 'PM' : 'AM'}`
-        }
-      }
-      
-      console.log(`❌ No matching format found for: "${dateTimeRequest}"`)
+      // If no format matches, provide helpful guidance
+      console.log(`❌ Unsupported format: "${dateTimeRequest}"`)
       return {
         success: false,
-        error: `Could not parse date/time format: "${dateTimeRequest}". Please provide time like "tomorrow at 2pm", "2025-10-15T14:00:00", or "15/10/2025, 2:00 pm"`
+        error: `Please provide datetime in ISO format (e.g., "2025-10-15T14:00:00") or DD/MM/YYYY format (e.g., "15/10/2025, 2:00 PM"). For VAPI: Use {{now}} variable to format current time properly.`
       }
       
     } catch (error) {
