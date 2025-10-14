@@ -61,13 +61,20 @@ export class BookingService {
           millisecond: 0
         }, { zone: clientTimezone })
         
+        console.log(`🔍 VAPI DATE PARSING:`)
+        console.log(`   Input: "${dateTimeRequest}"`)
+        console.log(`   Matched: day=${day}, month=${month}, year=${year}, hour=${hour}, minute=${minute}, ampm=${ampm}`)
+        console.log(`   Hour24: ${hour24}`)
+        console.log(`   Parsed in ${clientTimezone}: ${parsed.toISO()}`)
+        
         if (parsed.isValid) {
           return {
             dateTime: parsed.toISO() || '',
             description: `${parsed.toFormat('DDD')} at ${parsed.toFormat('h:mm a')}`
           }
         }
-      } catch {
+      } catch (error) {
+        console.error(`❌ Error parsing VAPI date format:`, error)
         // Fall through to natural language parsing
       }
     }
@@ -139,19 +146,51 @@ export class BookingService {
         dayDescription = 'Today'
       }
     } else {
-      // Try to parse as ISO date or fallback to today
-      try {
-        const parsed = DateTime.fromISO(lower, { zone: clientTimezone })
-        if (parsed.isValid) {
-          targetDate = parsed
-          dayDescription = parsed.toFormat('DDD')
-        } else {
+      // Handle various date formats that might come from VAPI
+      // Try parsing date patterns like "14/10/2025" or "2025-10-14"
+      const dateOnlyMatch = lower.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/) || lower.match(/(\d{4})-(\d{1,2})-(\d{1,2})/)
+      
+      if (dateOnlyMatch) {
+        try {
+          let day, month, year
+          if (lower.includes('/')) {
+            [, day, month, year] = dateOnlyMatch
+          } else {
+            [, year, month, day] = dateOnlyMatch
+          }
+          
+          const parsed = DateTime.fromObject({
+            year: parseInt(year),
+            month: parseInt(month),
+            day: parseInt(day)
+          }, { zone: clientTimezone })
+          
+          if (parsed.isValid) {
+            targetDate = parsed
+            dayDescription = parsed.toFormat('DDD')
+          } else {
+            targetDate = nowInClientTZ
+            dayDescription = 'Today (fallback)'
+          }
+        } catch {
           targetDate = nowInClientTZ
           dayDescription = 'Today (fallback)'
         }
-      } catch {
-        targetDate = nowInClientTZ
-        dayDescription = 'Today (fallback)'
+      } else {
+        // Try to parse as ISO date or fallback to today
+        try {
+          const parsed = DateTime.fromISO(lower, { zone: clientTimezone })
+          if (parsed.isValid) {
+            targetDate = parsed
+            dayDescription = parsed.toFormat('DDD')
+          } else {
+            targetDate = nowInClientTZ
+            dayDescription = 'Today (fallback)'
+          }
+        } catch {
+          targetDate = nowInClientTZ
+          dayDescription = 'Today (fallback)'
+        }
       }
     }
     

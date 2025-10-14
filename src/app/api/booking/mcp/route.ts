@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createMcpHandler } from "mcp-handler";
-import { BookingService } from "@/lib/helpers/booking/bookingService";
+import { SimplifiedBookingService } from "@/lib/helpers/booking/simplifiedBookingService";
 
 const handler = createMcpHandler((server) => {
   // BookAppointment - Main booking tool with smart slot suggestions
@@ -81,8 +81,8 @@ const handler = createMcpHandler((server) => {
         };
       }
 
-      // Use the dedicated booking service
-      const result = await BookingService.bookAppointment({
+      // Use the simplified booking service
+      const result = await SimplifiedBookingService.bookAppointment({
         clientId: numericClientId,
         customerName,
         customerEmail,
@@ -217,8 +217,8 @@ const handler = createMcpHandler((server) => {
         };
       }
 
-      // Use the dedicated booking service
-      const result = await BookingService.checkAvailability({
+      // Use the simplified booking service
+      const result = await SimplifiedBookingService.checkAvailability({
         clientId: numericClientId,
         dateRequest,
         startDate,

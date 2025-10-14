@@ -614,6 +614,13 @@ export const isWithinOfficeHours = (
       minute: '2-digit',
       timeZone: timezone
     });
+    
+    console.log(`🕐 OFFICE HOURS DEBUG:`)
+    console.log(`   Input dateTime: "${dateTime}"`)
+    console.log(`   Parsed date: ${date.toISOString()}`)
+    console.log(`   Day of week: ${dayOfWeek}`)
+    console.log(`   Time string in ${timezone}: ${timeString}`)
+    console.log(`   Office hours:`, officeHours[dayOfWeek])
 
     // Convert office hours format - assuming it's like:
     // { "monday": { "start": "09:00", "end": "17:00", "enabled": true }, ... }
