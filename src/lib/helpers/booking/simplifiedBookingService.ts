@@ -375,6 +375,8 @@ export class SimplifiedBookingService {
     console.log(`   Customer: ${customerName}`)
     console.log(`   Requested time: ${preferredDateTime}`)
     console.log(`   Type: ${appointmentType}`)
+    console.log(`   User-Agent: ${typeof window !== 'undefined' ? 'Browser' : 'Server'}`)
+    console.log(`   Environment: ${process.env.NODE_ENV || 'unknown'}`)
     
     try {
       // STEP 1: Customer lookup

@@ -97,33 +97,32 @@ const handler = createMcpHandler((server) => {
       });
 
       if (result.success) {
-        // Successful booking
-        let successText = `✅ **Appointment Booked Successfully!**\n\n`;
-        successText += `**📋 Booking Details:**\n`;
-        successText += `- **Customer**: ${customerName}\n`;
-        successText += `- **Type**: ${appointmentType}\n`;
-        successText += `- **Date & Time**: ${new Date(result.event?.start?.dateTime || '').toLocaleString()}\n`;
-        successText += `- **Duration**: ${duration} minutes\n`;
+        // VAPI-friendly success response - concise and voice-optimized
+        const eventTime = result.event?.start?.dateTime 
+          ? new Date(result.event.start.dateTime).toLocaleString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true
+            })
+          : 'the requested time';
+
+        let successText = `Perfect! I've successfully booked your appointment. Here are the details:\n\n`;
+        successText += `✅ Appointment Confirmed\n\n`;
+        successText += `• Customer: ${customerName}\n`;
+        successText += `• Email: ${result.event?.start?.dateTime ? 'confirmation sent' : 'will be sent'}\n`;
+        successText += `• Type: ${appointmentType}\n`;
+        successText += `• Date & Time: ${eventTime} (${duration} hour duration)\n`;
+        successText += `• Meeting: Online Teams meeting\n`;
         
-        if (isOnlineMeeting && result.event?.onlineMeeting?.joinUrl) {
-          successText += `- **Meeting Link**: ${result.event.onlineMeeting.joinUrl}\n`;
-        } else if (location) {
-          successText += `- **Location**: ${location}\n`;
+        if (result.event?.onlineMeeting?.joinUrl) {
+          successText += `• Meeting Link: Join Teams Meeting\n`;
         }
         
-        if (callContext) {
-          successText += `- **Call Context**: ${callContext}\n`;
-        }
-        
-        if (notes) {
-          successText += `- **Notes**: ${notes}\n`;
-        }
-        
-        successText += `\n📧 **Confirmation emails sent to all participants.**`;
-        
-        if (customerPhone) {
-          successText += `\n📱 **Customer Phone**: ${customerPhone}`;
-        }
+        successText += `\nConfirmation emails have been sent to all participants.`;
 
         return {
           content: [
@@ -134,17 +133,16 @@ const handler = createMcpHandler((server) => {
           ],
         };
       } else {
-        // Booking failed - check if alternatives are available
+        // VAPI-friendly error responses
         if (result.availableSlots && result.availableSlots.length > 0) {
-          let responseText = `⚠️ **Time Slot Unavailable**\n\n`;
-          responseText += `${result.error}\n\n`;
-          responseText += `**📋 Available Alternative Times:**\n\n`;
+          let responseText = `I'm sorry, that time slot isn't available. ${result.error}\n\n`;
+          responseText += `Here are some alternative times I found:\n\n`;
 
-          result.availableSlots.forEach((slot, index) => {
-            responseText += `${index + 1}. **${slot.startFormatted}** - ${slot.endFormatted}\n`;
+          result.availableSlots.slice(0, 3).forEach((slot, index) => {
+            responseText += `${index + 1}. ${slot.startFormatted}\n`;
           });
 
-          responseText += `\n💡 **${result.suggestedAction || 'Please choose one of the available times above.'}**`;
+          responseText += `\nWhich of these times works better for you?`;
 
           return {
             content: [
@@ -160,7 +158,7 @@ const handler = createMcpHandler((server) => {
             content: [
               {
                 type: "text",
-                text: `❌ **Booking Failed**\n\n${result.error}\n\n💡 **${result.suggestedAction || 'Please try again or contact support.'}**`,
+                text: `I'm sorry, I couldn't book that appointment. ${result.error} ${result.suggestedAction || 'Please try a different time or let me know how I can help.'}`,
               },
             ],
           };
@@ -243,21 +241,20 @@ const handler = createMcpHandler((server) => {
           content: [
             {
               type: "text",
-              text: `📅 **No Available Slots**\n\nNo available appointment slots found for the requested time period.\n\nPlease try a different date or contact us to discuss alternative options.`,
+              text: `I don't see any available appointment slots for that time period. Please try a different date or let me know if you'd like to check another time.`,
             },
           ],
         };
       }
 
-      // Format the available slots
-      let responseText = `📅 **Available Appointment Slots**\n\n`;
-      responseText += `Found **${result.availableSlots.length}** available slot(s) for ${duration}-minute appointments:\n\n`;
+      // VAPI-friendly available slots response
+      let responseText = `I found ${result.availableSlots.length} available appointment slots:\n\n`;
 
-      result.availableSlots.forEach((slot, index) => {
-        responseText += `**${index + 1}. ${slot.startFormatted}** - ${slot.endFormatted}\n`;
+      result.availableSlots.slice(0, 5).forEach((slot, index) => {
+        responseText += `${index + 1}. ${slot.startFormatted}\n`;
       });
 
-      responseText += `\n💡 **To book an appointment**, use the BookAppointment tool with your preferred time slot.`;
+      responseText += `\nWhich time works best for you?`;
 
       return {
         content: [
