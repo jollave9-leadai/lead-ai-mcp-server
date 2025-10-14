@@ -42,6 +42,36 @@ export class BookingService {
       }
     }
     
+    // Check if it's in the format returned by CheckAvailability: "14/10/2025, 02:51 pm"
+    const dateTimeMatch = lower.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})\s*(am|pm)/i)
+    if (dateTimeMatch) {
+      try {
+        const [, day, month, year, hour, minute, ampm] = dateTimeMatch
+        const hour24 = ampm.toLowerCase() === 'pm' && parseInt(hour) !== 12 
+          ? parseInt(hour) + 12 
+          : (ampm.toLowerCase() === 'am' && parseInt(hour) === 12 ? 0 : parseInt(hour))
+        
+        const parsed = DateTime.fromObject({
+          year: parseInt(year),
+          month: parseInt(month),
+          day: parseInt(day),
+          hour: hour24,
+          minute: parseInt(minute),
+          second: 0,
+          millisecond: 0
+        }, { zone: clientTimezone })
+        
+        if (parsed.isValid) {
+          return {
+            dateTime: parsed.toISO() || '',
+            description: `${parsed.toFormat('DDD')} at ${parsed.toFormat('h:mm a')}`
+          }
+        }
+      } catch {
+        // Fall through to natural language parsing
+      }
+    }
+    
     // Extract time pattern (e.g., "1:30 pm", "9am", "2:00 PM")
     const timeMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i)
     
@@ -409,19 +439,12 @@ export class BookingService {
       // 3. Parse requested date/time
       const parsedResult = this.parseCustomerDateTime(preferredDateTime, bookingInfo.timezone!)
       
-      console.log(`🔍 TIMEZONE DEBUG 2:`)
-      console.log(`   Raw parsed result: ${parsedResult.dateTime}`)
-      console.log(`   Client timezone: ${bookingInfo.timezone}`)
-      
       // Keep the DateTime in the client's timezone (don't convert to system timezone)
       const parsedDateTime = DateTime.fromISO(parsedResult.dateTime, { setZone: true })
-      console.log(`   DateTime with setZone: ${parsedDateTime.toISO()}`)
-      console.log(`   DateTime hour: ${parsedDateTime.hour}`)
       
       // Extract the local time components in the CLIENT'S timezone
       // Microsoft Graph will handle timezone conversion via Prefer header
       const startDateTime = parsedDateTime.toFormat('yyyy-MM-dd\'T\'HH:mm:ss')
-      console.log(`   Final startDateTime: ${startDateTime}`)
       
       // Calculate end time in the same timezone
       const endDateTime = parsedDateTime.plus({ minutes: duration }).toFormat('yyyy-MM-dd\'T\'HH:mm:ss')

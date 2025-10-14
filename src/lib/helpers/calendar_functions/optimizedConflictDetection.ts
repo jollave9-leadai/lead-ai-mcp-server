@@ -253,6 +253,7 @@ export class OptimizedConflictDetection {
         sortedBusyPeriods,
         durationMinutes,
         maxSuggestions,
+        timeZone,
         officeHours,
         agentTimezone
       )
@@ -311,6 +312,7 @@ export class OptimizedConflictDetection {
     busyPeriods: BusyPeriod[],
     durationMinutes: number,
     maxSuggestions: number,
+    timeZone: string,
     officeHours?: Record<string, { start: string; end: string; enabled: boolean }> | null,
     agentTimezone?: string
   ): AvailableSlot[] {
@@ -357,8 +359,8 @@ export class OptimizedConflictDetection {
       slots.push({
         start: candidate.start,
         end: candidate.end,
-        startFormatted: this.formatTimeForDisplay(candidate.start),
-        endFormatted: this.formatTimeForDisplay(candidate.end),
+        startFormatted: this.formatTimeForDisplay(candidate.start, timeZone),
+        endFormatted: this.formatTimeForDisplay(candidate.end, timeZone),
         confidence
       })
     }
@@ -422,11 +424,11 @@ export class OptimizedConflictDetection {
   }
 
   /**
-   * Format time for display
+   * Format time for display in client timezone
    */
-  private static formatTimeForDisplay(date: Date): string {
+  private static formatTimeForDisplay(date: Date, timeZone: string = 'Australia/Melbourne'): string {
     return date.toLocaleString('en-AU', {
-      timeZone: 'Australia/Melbourne',
+      timeZone: timeZone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
