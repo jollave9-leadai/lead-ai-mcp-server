@@ -702,6 +702,127 @@ export function parseGraphDateRequest(
 }
 
 /**
+ * Parse date and time request into a specific datetime for appointments
+ * Handles natural language like "today at 1:30 pm", "tomorrow at 9am", etc.
+ */
+export function parseAppointmentDateTime(
+  dateTimeRequest: string,
+  clientTimezone: string
+): {
+  dateTime: string
+  description: string
+} {
+  const nowInClientTZ = DateTime.now().setZone(clientTimezone)
+  const lower = dateTimeRequest.toLowerCase().trim()
+  
+  // Extract time pattern (e.g., "1:30 pm", "9am", "2:00 PM")
+  const timeMatch = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i)
+  
+  if (!timeMatch) {
+    // No time specified, default to 9 AM
+    const hour = 9
+    const minute = 0
+    
+    if (lower.includes('today')) {
+      const result = nowInClientTZ.set({ hour, minute, second: 0, millisecond: 0 })
+      return {
+        dateTime: result.toISO() || '',
+        description: `Today at ${hour}:${minute.toString().padStart(2, '0')} AM`
+      }
+    } else if (lower.includes('tomorrow')) {
+      const result = nowInClientTZ.plus({ days: 1 }).set({ hour, minute, second: 0, millisecond: 0 })
+      return {
+        dateTime: result.toISO() || '',
+        description: `Tomorrow at ${hour}:${minute.toString().padStart(2, '0')} AM`
+      }
+    }
+    
+    // Fallback to today 9 AM
+    const result = nowInClientTZ.set({ hour, minute, second: 0, millisecond: 0 })
+    return {
+      dateTime: result.toISO() || '',
+      description: `Today at ${hour}:${minute.toString().padStart(2, '0')} AM (default)`
+    }
+  }
+  
+  // Parse the time
+  const hour = parseInt(timeMatch[1])
+  const minute = timeMatch[2] ? parseInt(timeMatch[2]) : 0
+  const isPM = timeMatch[3].toLowerCase() === 'pm'
+  const adjustedHour = isPM && hour !== 12 ? hour + 12 : (hour === 12 && !isPM ? 0 : hour)
+  
+  let targetDate: DateTime
+  let dayDescription: string
+  
+  if (lower.includes('today')) {
+    targetDate = nowInClientTZ
+    dayDescription = 'Today'
+  } else if (lower.includes('tomorrow')) {
+    targetDate = nowInClientTZ.plus({ days: 1 })
+    dayDescription = 'Tomorrow'
+  } else if (lower.includes('this friday') || lower.includes('next monday')) {
+    // Handle "this friday at 2pm", "next monday at 10am", etc.
+    const dayMatch = lower.match(/(?:this|next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/)
+    if (dayMatch) {
+      const dayName = dayMatch[1]
+      const isNext = lower.includes('next')
+      const targetDay = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"].indexOf(dayName)
+      const currentWeekday = nowInClientTZ.weekday === 7 ? 0 : nowInClientTZ.weekday
+      
+      let diff = (targetDay - currentWeekday + 7) % 7
+      if (isNext && diff === 0) {
+        diff = 7 // Next week if it's the same day
+      }
+      
+      targetDate = nowInClientTZ.plus({ days: diff })
+      dayDescription = `${isNext ? 'Next' : 'This'} ${dayName.charAt(0).toUpperCase() + dayName.slice(1)}`
+    } else {
+      // Fallback to today
+      targetDate = nowInClientTZ
+      dayDescription = 'Today'
+    }
+  } else {
+    // Try to parse as ISO date or fallback to today
+    try {
+      // Check if it's already a full ISO datetime
+      if (dateTimeRequest.includes('T')) {
+        const parsed = DateTime.fromISO(dateTimeRequest, { zone: clientTimezone })
+        if (parsed.isValid) {
+          // Return the exact datetime as provided
+          return {
+            dateTime: parsed.toISO() || '',
+            description: `${parsed.toFormat('DDD')} at ${parsed.toFormat('h:mm a')}`
+          }
+        }
+      }
+      
+      const parsed = DateTime.fromISO(lower, { zone: clientTimezone })
+      if (parsed.isValid) {
+        targetDate = parsed
+        dayDescription = parsed.toFormat('DDD')
+      } else {
+        targetDate = nowInClientTZ
+        dayDescription = 'Today (fallback)'
+      }
+    } catch {
+      targetDate = nowInClientTZ
+      dayDescription = 'Today (fallback)'
+    }
+  }
+  
+  // Set the specific time
+  const result = targetDate.set({ hour: adjustedHour, minute, second: 0, millisecond: 0 })
+  
+  // Format time for description
+  const timeStr = `${hour}:${minute.toString().padStart(2, '0')} ${isPM ? 'PM' : 'AM'}`
+  
+  return {
+    dateTime: result.toISO() || '',
+    description: `${dayDescription} at ${timeStr}`
+  }
+}
+
+/**
  * Extract metadata from Microsoft Graph event extensions
  */
 export function extractEventMetadata(event: GraphEvent): Record<string, unknown> | null {

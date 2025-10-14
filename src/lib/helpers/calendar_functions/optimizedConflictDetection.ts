@@ -3,6 +3,7 @@ import type { GraphCalendarConnection } from '@/types'
 import { AdvancedCacheService } from '../cache/advancedCacheService'
 import { EnhancedGraphApiService } from './enhancedGraphApiService'
 import { isWithinOfficeHours } from '../utils'
+import { DateTime } from 'luxon'
 
 interface TimeSlot {
   start: Date
@@ -31,11 +32,11 @@ interface AvailableSlot extends TimeSlot {
  */
 export class OptimizedConflictDetection {
   
-  // Reduced search windows for better performance
+  // Expanded search windows for better conflict detection
   private static readonly SEARCH_WINDOWS = {
-    CONFLICT_CHECK: 1 * 60 * 60 * 1000,    // 1 hour before/after for conflict check
-    SLOT_SEARCH: 4 * 60 * 60 * 1000,       // 4 hours before/after for slot finding
-    EXTENDED_SEARCH: 8 * 60 * 60 * 1000    // 8 hours for extended search
+    CONFLICT_CHECK: 6 * 60 * 60 * 1000,    // 6 hours before/after for conflict check
+    SLOT_SEARCH: 8 * 60 * 60 * 1000,       // 8 hours before/after for slot finding
+    EXTENDED_SEARCH: 12 * 60 * 60 * 1000   // 12 hours for extended search
   }
 
   /**
@@ -52,8 +53,19 @@ export class OptimizedConflictDetection {
     try {
       console.log(`🔍 OPTIMIZED: Checking conflicts for ${startDateTime} to ${endDateTime}`)
       
-      const requestedStart = new Date(startDateTime)
-      const requestedEnd = new Date(endDateTime)
+      // Parse the datetime strings in the correct timezone context
+      // Since startDateTime/endDateTime are in client timezone format (e.g., 2025-10-15T14:00:00)
+      // we need to interpret them in the client's timezone, not system timezone
+      const requestedStartLuxon = DateTime.fromISO(startDateTime, { zone: timeZone })
+      const requestedEndLuxon = DateTime.fromISO(endDateTime, { zone: timeZone })
+      
+      const requestedStart = requestedStartLuxon.toJSDate()
+      const requestedEnd = requestedEndLuxon.toJSDate()
+      
+      console.log(`🔍 CONFLICT DEBUG: Requested times in client timezone and UTC:`)
+      console.log(`   Input: ${startDateTime} in ${timeZone}`)
+      console.log(`   Parsed: ${requestedStartLuxon.toISO()}`)
+      console.log(`   UTC: ${requestedStart.toISOString()}`)
       
       // FIRST: Check if requested time is within office hours
       if (officeHours) {
@@ -87,6 +99,12 @@ export class OptimizedConflictDetection {
           const searchStart = new Date(requestedStart.getTime() - this.SEARCH_WINDOWS.CONFLICT_CHECK)
           const searchEnd = new Date(requestedEnd.getTime() + this.SEARCH_WINDOWS.CONFLICT_CHECK)
           
+          // Ensure searchStart is not after searchEnd
+          if (searchStart >= searchEnd) {
+            console.warn(`⚠️ Invalid date range: ${searchStart.toISOString()} >= ${searchEnd.toISOString()}`)
+            return []
+          }
+          
           const events = await EnhancedGraphApiService.getEventsOptimized(
             connection,
             {
@@ -98,8 +116,14 @@ export class OptimizedConflictDetection {
           )
           
           if (!events.success || !events.events) {
+            console.log(`⚠️ No events found or API error`)
             return []
           }
+          
+          console.log(`📅 Found ${events.events.length} events in search window`)
+          events.events.forEach((event, index) => {
+            console.log(`   ${index + 1}. ${event.subject} | ${event.start?.dateTime} - ${event.end?.dateTime}`)
+          })
           
           return events.events.map(event => ({
             id: event.id,
