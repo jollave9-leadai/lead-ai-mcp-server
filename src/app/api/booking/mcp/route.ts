@@ -1,15 +1,17 @@
 import { z } from "zod";
 import { createMcpHandler } from "mcp-handler";
 import { FinalOptimizedCalendarOperations } from "@/lib/helpers/calendar_functions/finalOptimizedCalendarOperations";
+import { AgentCalendarService } from "@/lib/helpers/booking/agentCalendarService";
 import {
   getContactWithFuzzySearch,
-  getAgentByCalendarConnection, 
+  getCalendarConnectionByAgent,
   isWithinOfficeHours 
 } from "@/lib/helpers/utils";
 import type {
   CreateGraphEventMCPRequest,
   GetAvailabilityRequest,
 } from "@/types";
+
 
 const handler = createMcpHandler((server) => {
   // CreateCalendarEvent - Main booking tool for customers
@@ -20,6 +22,9 @@ const handler = createMcpHandler((server) => {
       clientId: z
         .union([z.number(), z.string().transform(Number)])
         .describe("Client ID number (e.g., 10000001)"),
+      agentId: z
+        .union([z.number(), z.string().transform(Number)])
+        .describe("Agent ID making the call (e.g., 123) - required to identify which calendar to use"),
       subject: z.string().describe("Meeting title (e.g., 'Sales Call with John Smith')"),
       startDateTime: z
         .string()
@@ -71,6 +76,7 @@ const handler = createMcpHandler((server) => {
       try {
         const {
           clientId,
+          agentId,
           subject,
           startDateTime,
           endDateTime,
@@ -88,9 +94,11 @@ const handler = createMcpHandler((server) => {
         console.log("📅 Customer booking request (CreateCalendarEvent)");
         console.table(input);
         
-        // Convert and validate clientId
+        // Convert and validate clientId and agentId
         const numericClientId =
           typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+        const numericAgentId =
+          typeof agentId === "string" ? parseInt(agentId, 10) : agentId;
 
         if (!numericClientId || isNaN(numericClientId)) {
           return {
@@ -98,6 +106,17 @@ const handler = createMcpHandler((server) => {
               {
                 type: "text",
                 text: "❌ Invalid client ID. Please provide a valid client ID number.",
+              },
+            ],
+          };
+        }
+
+        if (!numericAgentId || isNaN(numericAgentId)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "❌ Invalid agent ID. Please provide a valid agent ID number.",
               },
             ],
           };
@@ -196,68 +215,57 @@ const handler = createMcpHandler((server) => {
         
         console.log(`✅ Booking time is valid (${timeDifference} minutes in the future)`)
 
-        // Get calendar connection to find assigned agent and office hours
-        console.log(`🏢 Checking office hours for calendar booking...`);
+        // Get agent's calendar connection and validate office hours
+        console.log(`🏢 Getting calendar connection for agent ${numericAgentId}...`);
         
-        // We need to get the calendar connection ID first
-        const { getCalendarConnectionByClientId } = await import("@/lib/helpers/calendar_functions");
-        const connection = await getCalendarConnectionByClientId(numericClientId);
+        const agentCalendarResult = await getCalendarConnectionByAgent(numericAgentId, numericClientId);
         
-        if (!connection) {
+        if (!agentCalendarResult.success) {
           return {
             content: [
               {
                 type: "text",
-                text: "❌ No calendar connection found for this client. Please connect a Microsoft calendar first.",
+                text: `❌ ${agentCalendarResult.error}`,
               },
             ],
           };
         }
 
-        // Get agent assigned to this calendar connection
-        const agentAssignment = await getAgentByCalendarConnection(connection.id, numericClientId);
+        const { connection, agent } = agentCalendarResult;
         
-        if (agentAssignment && agentAssignment.agents) {
-          const agent = agentAssignment.agents as unknown as {
-            id: number;
-            name: string;
-            profiles: {
-              id: number;
-              name: string;
-              office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
-              timezone: string;
-            } | {
-              id: number;
-              name: string;
-              office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
-              timezone: string;
-            }[];
+        if (!connection || !agent) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "❌ Failed to get agent calendar information. Please check agent calendar assignment.",
+              },
+            ],
           };
-          
-          const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles;
-          // Check if the requested time is within office hours
-          const officeHoursCheck = isWithinOfficeHours(
-            startDateTime, 
-            profile.office_hours, 
-            profile.timezone || 'Australia/Melbourne'
-          );
-          
-          if (!officeHoursCheck.isWithin) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `❌ ${officeHoursCheck.reason} (Agent: ${agent.name})`,
-                },
-              ],
-            };
-          }
-          
-          console.log(`✅ Requested time is within office hours for agent ${agent.name}`);
-        } else {
-          console.log(`⚠️ No agent assignment found for calendar connection. Proceeding without office hours validation.`);
         }
 
+        // Check if the requested time is within office hours
+        const officeHoursCheck = isWithinOfficeHours(
+          startDateTime, 
+          agent.profiles.office_hours, 
+          agent.profiles.timezone || 'Australia/Melbourne'
+        );
+        
+        if (!officeHoursCheck.isWithin) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ ${officeHoursCheck.reason} (Agent: ${agent.name})`,
+              },
+            ],
+          };
+        }
+        
+        console.log(`✅ Requested time is within office hours for agent ${agent.name} (${agent.agent_type})`);
+        console.log(`📅 Using calendar: ${connection.email} (${connection.display_name})`);
+
+        // Create the calendar event using the agent's specific calendar connection
         const request: CreateGraphEventMCPRequest = {
           clientId: numericClientId,
           subject,
@@ -271,7 +279,16 @@ const handler = createMcpHandler((server) => {
           calendarId,
         };
 
-        const result = await FinalOptimizedCalendarOperations.createCalendarEventForClient(numericClientId, request);
+        // Create the event using the agent's specific calendar connection
+        // We need to bypass the client-level calendar lookup and use the agent's calendar directly
+        console.log(`📅 Creating event on agent ${agent.name}'s calendar: ${connection.email}`);
+        
+        const result = await AgentCalendarService.createEventWithAgentCalendar(
+          connection,
+          agent,
+          request,
+          numericClientId
+        );
 
         if (!result.success) {
           // Check if it's a conflict with suggested slots
