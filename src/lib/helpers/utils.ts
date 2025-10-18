@@ -4,6 +4,7 @@ import axios from "axios";
 import { BASE_SUPABASE_FUNCTIONS_URL } from "./constants";
 import { google } from "googleapis";
 import { Client } from "@microsoft/microsoft-graph-client";
+import { DateTime } from "luxon";
 
 export const getCustomerWithFuzzySearch = async (
   name: string,
@@ -25,6 +26,116 @@ export const getCustomerWithFuzzySearch = async (
     threshold: 0.5, // how fuzzy (0 = exact, 1 = very fuzzy)
   });
   return fuse.search(name);
+};
+
+// New function for leads search (for inbound/outbound agents)
+export const getLeadWithFuzzySearch = async (
+  name: string,
+  clientId: string
+) => {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.DEVELOP_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  try {
+    const { data: leads, error } = await supabase
+      .schema("lead_dialer")
+      .from("leads")
+      .select("id, full_name, first_name, last_name, email, phone_number, company, job_title, client_id")
+      .eq("client_id", clientId)
+      .eq("is_active", true);
+
+    if (error) {
+      console.error('Error fetching leads:', error);
+      return [];
+    }
+
+    const fuse = new Fuse(leads || [], {
+      keys: ["full_name", "first_name", "last_name"], // fields to search
+      threshold: 0.5, // how fuzzy (0 = exact, 1 = very fuzzy)
+    });
+    return fuse.search(name);
+  } catch (error) {
+    console.error('Error in getLeadWithFuzzySearch:', error);
+    return [];
+  }
+};
+
+// Combined function to search both customers and leads
+export const getContactWithFuzzySearch = async (
+  name: string,
+  clientId: string,
+  searchType: 'customer' | 'lead' | 'both' = 'both'
+): Promise<{
+  found: boolean;
+  contact?: {
+    id: number;
+    full_name: string;
+    email: string;
+    phone_number?: string;
+    company?: string;
+    source: 'customer' | 'lead';
+  };
+  score?: number;
+}> => {
+  try {
+    let bestMatch: {
+      id: number;
+      full_name: string;
+      email: string;
+      phone_number?: string;
+      company?: string;
+    } | null = null;
+    let bestScore = 1; // Lower is better for Fuse.js
+    let source: 'customer' | 'lead' = 'customer';
+
+    // Search customers if requested
+    if (searchType === 'customer' || searchType === 'both') {
+      const customerResults = await getCustomerWithFuzzySearch(name, clientId);
+      if (customerResults && customerResults.length > 0) {
+        const topCustomer = customerResults[0];
+        if (topCustomer.score !== undefined && topCustomer.score < bestScore) {
+          bestMatch = topCustomer.item;
+          bestScore = topCustomer.score;
+          source = 'customer';
+        }
+      }
+    }
+
+    // Search leads if requested
+    if (searchType === 'lead' || searchType === 'both') {
+      const leadResults = await getLeadWithFuzzySearch(name, clientId);
+      if (leadResults && leadResults.length > 0) {
+        const topLead = leadResults[0];
+        if (topLead.score !== undefined && topLead.score < bestScore) {
+          bestMatch = topLead.item;
+          bestScore = topLead.score;
+          source = 'lead';
+        }
+      }
+    }
+
+    if (bestMatch) {
+      return {
+        found: true,
+        contact: {
+          id: bestMatch.id,
+          full_name: bestMatch.full_name,
+          email: bestMatch.email,
+          phone_number: bestMatch.phone_number,
+          company: bestMatch.company,
+          source
+        },
+        score: bestScore
+      };
+    }
+
+    return { found: false };
+  } catch (error) {
+    console.error('Error in getContactWithFuzzySearch:', error);
+    return { found: false };
+  }
 };
 
 export const getAgentWithFuzzySearch = async (name: string) => {
@@ -568,6 +679,7 @@ export const getAgentByCalendarConnection = async (calendarConnectionId: string,
         profile_id,
         client_id,
         is_active,
+        agent_type,
         profiles (
           id,
           name,
@@ -589,7 +701,157 @@ export const getAgentByCalendarConnection = async (calendarConnectionId: string,
 };
 
 /**
+ * Get calendar connection assigned to a specific agent
+ * This is the key function for the booking workflow
+ */
+export const getCalendarConnectionByAgent = async (
+  agentId: number,
+  clientId: number
+): Promise<{
+  success: boolean;
+  connection?: {
+    id: string;
+    email: string;
+    display_name: string;
+    access_token: string;
+    refresh_token: string;
+    expires_at: string;
+  };
+  agent?: {
+    id: number;
+    name: string;
+    agent_type: string;
+    profiles: {
+      id: number;
+      name: string;
+      office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+      timezone: string;
+    };
+  };
+  error?: string;
+}> => {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  try {
+    console.log(`🔍 Looking up calendar for agent ${agentId} in client ${clientId}`);
+
+    // Get the agent's calendar assignment
+    const { data: assignment, error: assignmentError } = await supabase
+      .schema("lead_dialer")
+      .from("agent_calendar_assignments")
+      .select(`
+        id,
+        client_id,
+        agent_id,
+        calendar_connection_id,
+        agents!inner (
+          id,
+          name,
+          agent_type,
+          profile_id,
+          profiles!inner (
+            id,
+            name,
+            office_hours,
+            timezone
+          )
+        ),
+        calendar_connections!inner (
+          id,
+          email,
+          display_name,
+          access_token,
+          refresh_token,
+          expires_at,
+          is_connected
+        )
+      `)
+      .eq("agent_id", agentId)
+      .eq("client_id", clientId)
+      .single();
+
+    if (assignmentError) {
+      console.error("Error fetching agent calendar assignment:", assignmentError);
+      return {
+        success: false,
+        error: `No calendar assignment found for agent ${agentId}. Please assign a calendar to this agent.`
+      };
+    }
+
+    if (!assignment) {
+      return {
+        success: false,
+        error: `Agent ${agentId} does not have a calendar assigned. Please assign a calendar to this agent.`
+      };
+    }
+
+    // Check if calendar connection is active
+    const calendarConnection = assignment.calendar_connections as unknown as {
+      id: string;
+      email: string;
+      display_name: string;
+      access_token: string;
+      refresh_token: string;
+      expires_at: string;
+      is_connected: boolean;
+    };
+
+    if (!calendarConnection.is_connected) {
+      return {
+        success: false,
+        error: `Calendar connection for agent ${agentId} is not active. Please reconnect the calendar.`
+      };
+    }
+
+    const agent = assignment.agents as unknown as {
+      id: number;
+      name: string;
+      agent_type: string;
+      profile_id: number;
+      profiles: {
+        id: number;
+        name: string;
+        office_hours: Record<string, { start: string; end: string; enabled: boolean }>;
+        timezone: string;
+      };
+    };
+
+    console.log(`✅ Found calendar assignment for agent ${agent.name} (${agent.agent_type})`);
+    console.log(`📧 Calendar: ${calendarConnection.email} (${calendarConnection.display_name})`);
+
+    return {
+      success: true,
+      connection: {
+        id: calendarConnection.id,
+        email: calendarConnection.email,
+        display_name: calendarConnection.display_name,
+        access_token: calendarConnection.access_token,
+        refresh_token: calendarConnection.refresh_token,
+        expires_at: calendarConnection.expires_at,
+      },
+      agent: {
+        id: agent.id,
+        name: agent.name,
+        agent_type: agent.agent_type,
+        profiles: agent.profiles,
+      }
+    };
+
+  } catch (error) {
+    console.error("Error in getCalendarConnectionByAgent:", error);
+    return {
+      success: false,
+      error: `Failed to get calendar connection: ${error instanceof Error ? error.message : 'Unknown error'}`
+    };
+  }
+};
+
+/**
  * Check if a time slot is within office hours
+ * Handles both UTC and local timezone formats properly
  */
 export const isWithinOfficeHours = (
   dateTime: string,
@@ -601,7 +863,24 @@ export const isWithinOfficeHours = (
   }
 
   try {
-    const date = new Date(dateTime);
+    let date: Date;
+    let interpretationMethod = '';
+
+    // SMART TIMEZONE DETECTION:
+    // If datetime ends with 'Z' or has timezone info, it's UTC/absolute time
+    // If datetime has no timezone info, interpret it as client's local time
+    if (dateTime.endsWith('Z') || dateTime.includes('+') || dateTime.includes('-', 10)) {
+      // Has timezone info - use as-is
+      date = new Date(dateTime);
+      interpretationMethod = 'UTC/Absolute';
+    } else {
+      // No timezone info - interpret as client's local time
+      // Convert "2025-10-15T09:00:00" to "2025-10-15T09:00:00" in client timezone
+      const localTime = DateTime.fromISO(dateTime, { zone: timezone });
+      date = localTime.toJSDate();
+      interpretationMethod = 'Client Local Time';
+    }
+    
     const dayOfWeek = date.toLocaleDateString('en-US', { 
       weekday: 'long',
       timeZone: timezone 
@@ -613,6 +892,14 @@ export const isWithinOfficeHours = (
       minute: '2-digit',
       timeZone: timezone
     });
+    
+    console.log(`🕐 OFFICE HOURS DEBUG:`)
+    console.log(`   Input dateTime: "${dateTime}"`)
+    console.log(`   Interpretation: ${interpretationMethod}`)
+    console.log(`   Parsed date (UTC): ${date.toISOString()}`)
+    console.log(`   Day of week in ${timezone}: ${dayOfWeek}`)
+    console.log(`   Time string in ${timezone}: ${timeString}`)
+    console.log(`   Office hours for ${dayOfWeek}:`, officeHours[dayOfWeek])
 
     // Convert office hours format - assuming it's like:
     // { "monday": { "start": "09:00", "end": "17:00", "enabled": true }, ... }
@@ -635,6 +922,7 @@ export const isWithinOfficeHours = (
       };
     }
 
+    console.log(`✅ OFFICE HOURS: ${timeString} is within ${startTime}-${endTime} on ${dayOfWeek}s`);
     return { isWithin: true };
   } catch (error) {
     console.error("Error checking office hours:", error);

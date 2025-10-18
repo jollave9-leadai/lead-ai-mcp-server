@@ -237,7 +237,8 @@ export class EnhancedGraphApiService {
   static async createEventOptimized(
     connection: GraphCalendarConnection,
     eventData: CreateGraphEventRequest,
-    calendarId: string = 'primary'
+    calendarId: string = 'primary',
+    timeZone?: string
   ): Promise<{ success: boolean; event?: GraphEvent; error?: string }> {
     const startTime = Date.now()
     let retryCount = 0
@@ -246,7 +247,7 @@ export class EnhancedGraphApiService {
       const result = await EnhancedErrorHandler.executeWithRetry(
         async () => {
           retryCount++
-          return await this.createEventWithRateLimit(connection, eventData, calendarId)
+          return await this.createEventWithRateLimit(connection, eventData, calendarId, timeZone)
         },
         {
           operation: 'createEventOptimized',
@@ -289,7 +290,8 @@ export class EnhancedGraphApiService {
   private static async createEventWithRateLimit(
     connection: GraphCalendarConnection,
     eventData: CreateGraphEventRequest,
-    calendarId: string
+    calendarId: string,
+    timeZone?: string
   ): Promise<{ success: boolean; event?: GraphEvent; error?: string }> {
     // Wait for rate limiter
     await this.rateLimiter.waitForSlot()
@@ -302,7 +304,7 @@ export class EnhancedGraphApiService {
     const response = await makeGraphRequest(connection, endpoint, {
       method: 'POST',
       body: JSON.stringify(eventData)
-    })
+    }, timeZone)
     const requestDuration = Date.now() - requestStart
 
     // Record response for rate limiter

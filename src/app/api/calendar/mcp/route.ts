@@ -251,15 +251,15 @@ const handler = createMcpHandler(
               errorMessage += "Either customerName (to search database) or attendeeEmail is required.";
           }
 
-          return {
-            content: [
-              {
-                type: "text",
+            return {
+              content: [
+                {
+                  type: "text",
                   text: errorMessage,
-              },
-            ],
-          };
-        }
+                },
+              ],
+            };
+          }
 
           // Validate that the booking is not in the past
           console.log(`🕐 Validating booking time is not in the past...`)
@@ -734,21 +734,21 @@ const handler = createMcpHandler(
         const { clientId, dateRequest, startDate, endDate, searchQuery, confirmDeletion, calendarId } = input;
 
         console.log("bulk delete calendar events (Microsoft Graph)");
-        console.table(input);
+          console.table(input);
 
-        const numericClientId =
-          typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
+          const numericClientId =
+            typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
 
-        if (!numericClientId || isNaN(numericClientId)) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Error: clientId is required and must be a valid number",
-              },
-            ],
-          };
-        }
+          if (!numericClientId || isNaN(numericClientId)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "Error: clientId is required and must be a valid number",
+                },
+              ],
+            };
+          }
 
         try {
           // First, get events based on criteria
@@ -888,7 +888,7 @@ const handler = createMcpHandler(
 
               if (deleteResult.success) {
                 successCount++;
-              } else {
+          } else {
                 failureCount++;
               }
 
@@ -1040,14 +1040,14 @@ const handler = createMcpHandler(
           
           responseText += `\n${result.formattedEvents}`;
 
-          return {
-            content: [
-              {
-                type: "text",
+            return {
+              content: [
+                {
+                  type: "text",
                 text: responseText,
-              },
-            ],
-          };
+                },
+              ],
+            };
         } catch (error) {
           console.error("Error in SearchCalendarEvents:", error);
           return {
@@ -1078,7 +1078,7 @@ const handler = createMcpHandler(
           
           console.log("get calendars (Microsoft Graph)");
           console.table(input);
-          
+
           // Convert and validate clientId
           const numericClientId =
             typeof clientId === "string" ? parseInt(clientId, 10) : clientId;
@@ -1124,13 +1124,13 @@ const handler = createMcpHandler(
               
               responseText += `\n`;
             });
-            }
+          }
 
           return {
             content: [
               {
                 type: "text",
-                  text: responseText,
+                text: responseText,
               },
             ],
           };

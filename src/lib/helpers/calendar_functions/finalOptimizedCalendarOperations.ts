@@ -236,23 +236,24 @@ export class FinalOptimizedCalendarOperations {
         eventData.isOnlineMeeting = true
         eventData.onlineMeetingProvider = 'teamsForBusiness'
         
-        // Add Teams meeting information to the body if not already present
-        const teamsInfo = '\n\nJoin the meeting from your calendar or use the Teams app.\n'
-        if (eventData.body) {
-          eventData.body.content += teamsInfo
-        } else {
-          eventData.body = {
-            contentType: 'html',
-            content: `<p>Meeting details:</p>${teamsInfo.replace(/\n/g, '<br>')}`
-          }
-        }
+        console.log('💻 Teams meeting requested - adding online meeting properties')
+      }
+
+      // Temporarily disable metadata to isolate validation issue
+      if (request.metadata) {
+        console.log('📊 Metadata available but temporarily disabled for debugging:', request.metadata)
       } 
 
-      // Create event using enhanced Graph API service
+      // Get client timezone for Microsoft Graph Prefer header
+      const clientCalendarData = await AdvancedCacheService.getClientCalendarData(request.clientId)
+      const clientTimezone = clientCalendarData?.timezone || 'Australia/Melbourne'
+      
+      // Create event using enhanced Graph API service with timezone
       const eventResponse = await EnhancedGraphApiService.createEventOptimized(
         connection,
         eventData,
-        request.calendarId || 'primary'
+        request.calendarId || 'primary',
+        clientTimezone
       )
 
       if (!eventResponse.success) {
