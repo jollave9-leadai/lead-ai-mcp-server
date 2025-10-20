@@ -57,6 +57,14 @@ export {
 // Timezone Parsing
 export { parseDateInTimezone } from "./parseDateInTimezone";
 
+// Date Normalization (VAPI Integration)
+export {
+  normalizeDateTimeString,
+  validateFutureDateTime,
+  formatDateTimeForDisplay,
+  createDateTimeErrorMessage,
+} from "./dateNormalizer";
+
 // Booking Operations (Main Service)
 export {
   createBooking,

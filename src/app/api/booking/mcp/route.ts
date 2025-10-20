@@ -14,6 +14,10 @@ import {
   getDetailedAvailability,
   createBooking,
 } from "@/lib/helpers/booking_functions";
+import {
+  normalizeDateTimeString,
+  createDateTimeErrorMessage,
+} from "@/lib/helpers/booking_functions/dateNormalizer";
 
 const handler = createMcpHandler(
   (server) => {
@@ -34,10 +38,10 @@ const handler = createMcpHandler(
           .describe("Agent ID number (e.g., 123) - identifies which agent's calendar to check"),
         requestedStartTime: z
           .string()
-          .describe("Preferred start time in full ISO 8601 format with timezone, e.g. '2025-10-20T13:00:00+08:00'"),
+          .describe("Start time in ISO 8601 format: '2025-10-20T13:00:00' or '2025-10-20T13:00:00+08:00'. For VAPI: Use {{now}} variable and add duration to calculate."),
         requestedEndTime: z
           .string()
-          .describe("Preferred end time in full ISO 8601 format with timezone, e.g. '2025-10-20T14:00:00+08:00'"),
+          .describe("End time in ISO 8601 format: '2025-10-20T14:00:00' or '2025-10-20T14:00:00+08:00'. Must be after start time."),
         durationMinutes: z
           .number()
           .optional()
@@ -86,11 +90,40 @@ const handler = createMcpHandler(
             };
           }
 
+          // Normalize datetime strings from VAPI
+          const normalizedStart = normalizeDateTimeString(input.requestedStartTime);
+          if (!normalizedStart.success) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: createDateTimeErrorMessage(input.requestedStartTime),
+                },
+              ],
+            };
+          }
+
+          const normalizedEnd = normalizeDateTimeString(input.requestedEndTime);
+          if (!normalizedEnd.success) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: createDateTimeErrorMessage(input.requestedEndTime),
+                },
+              ],
+            };
+          }
+
+          console.log(`✅ Normalized dates:`);
+          console.log(`   Start: ${normalizedStart.originalInput} → ${normalizedStart.normalizedDateTime}`);
+          console.log(`   End: ${normalizedEnd.originalInput} → ${normalizedEnd.normalizedDateTime}`);
+
           const result = await findAvailableTimeSlots({
             clientId: numericClientId,
             agentId: numericAgentId,
-            startDateTime: input.requestedStartTime,
-            endDateTime: input.requestedEndTime,
+            startDateTime: normalizedStart.normalizedDateTime!,
+            endDateTime: normalizedEnd.normalizedDateTime!,
             durationMinutes: input.durationMinutes,
             maxSuggestions: input.maxSuggestions,
           });
@@ -297,10 +330,10 @@ const handler = createMcpHandler(
           .describe("Meeting title (e.g., 'Sales Call with John Smith')"),
         startDateTime: z
           .string()
-          .describe("Preferred end time in full ISO 8601 format with timezone, e.g. '2025-10-20T14:00:00+08:00'"),
+          .describe("Start time in ISO 8601 format: '2025-10-20T13:00:00' or '2025-10-20T13:00:00+08:00'. For VAPI: Use {{now}} and add offset."),
         endDateTime: z
           .string()
-          .describe("Preferred end time in full ISO 8601 format with timezone, e.g. '2025-10-20T14:00:00+08:00'"),
+          .describe("End time in ISO 8601 format: '2025-10-20T14:00:00' or '2025-10-20T14:00:00+08:00'. Must be after start time."),
         contactName: z
           .string()
           .describe("Contact name: 'John Smith'"),
@@ -364,13 +397,42 @@ const handler = createMcpHandler(
             };
           }
 
+          // Normalize datetime strings from VAPI
+          const normalizedStart = normalizeDateTimeString(input.startDateTime);
+          if (!normalizedStart.success) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: createDateTimeErrorMessage(input.startDateTime),
+                },
+              ],
+            };
+          }
+
+          const normalizedEnd = normalizeDateTimeString(input.endDateTime);
+          if (!normalizedEnd.success) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: createDateTimeErrorMessage(input.endDateTime),
+                },
+              ],
+            };
+          }
+
+          console.log(`✅ Normalized dates:`);
+          console.log(`   Start: ${normalizedStart.originalInput} → ${normalizedStart.normalizedDateTime}`);
+          console.log(`   End: ${normalizedEnd.originalInput} → ${normalizedEnd.normalizedDateTime}`);
+
           // Create booking
           const result = await createBooking({
             clientId: numericClientId,
             agentId: numericAgentId,
             subject: input.subject,
-            startDateTime: input.startDateTime,
-            endDateTime: input.endDateTime,
+            startDateTime: normalizedStart.normalizedDateTime!,
+            endDateTime: normalizedEnd.normalizedDateTime!,
             contactName: input.contactName,
             contactEmail: input.contactEmail,
             contactPhone: input.contactPhone,
