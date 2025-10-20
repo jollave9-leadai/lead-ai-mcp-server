@@ -37,7 +37,9 @@ import { getCalendarConnectionByAgentId } from "./calendarConnectionService";
 import {
   normalizeTimezone,
   isValidTimezone,
+  formatDateTimeInTimezone,
 } from "./timezoneService";
+import { parseDateInTimezone } from "./parseDateInTimezone";
 import { FinalOptimizedCalendarOperations } from "../calendar_functions/finalOptimizedCalendarOperations";
 
 /**
@@ -72,8 +74,9 @@ export async function createBooking(
 
     const businessTimezone = officeHours?.timezone || "Australia/Melbourne";
 
-    // Step 3: Validate customer timezone if provided
-    // Note: We don't convert times - Microsoft Graph API handles timezone via Prefer header
+    // Step 3: Timezone handling
+    // Important: Customer's datetime is interpreted as CLIENT'S timezone (not UTC!)
+    // Example: Customer says "2pm" → We treat as 2pm Melbourne time (NOT 2pm UTC)
     let customerTimezone: string | undefined;
 
     if (request.customerTimezone) {
@@ -87,16 +90,23 @@ export async function createBooking(
         };
       }
 
-      console.log(`🌍 Customer timezone: ${customerTimezone}, Business timezone: ${businessTimezone}`);
-      console.log(`   Customer provided time: ${request.startDateTime} - ${request.endDateTime}`);
-      console.log(`   📌 Microsoft Graph will handle timezone conversion automatically via Prefer header`);
+      console.log(`🌍 Customer timezone specified: ${customerTimezone}`);
+      console.log(`   ⚠️  Note: For now, datetime will be interpreted as client timezone: ${businessTimezone}`);
+      console.log(`   📌 Future enhancement: Could interpret as customer's timezone`);
     } else {
-      console.log(`🌍 No customer timezone provided, using business timezone: ${businessTimezone}`);
+      console.log(`🌍 No customer timezone specified - using client timezone: ${businessTimezone}`);
     }
 
-    // Use customer's datetime as-is (Graph API will handle timezone conversion)
+    // Use datetime as-is - it will be interpreted in CLIENT'S timezone by Graph API
+    // Example: "14:00:00" + timeZone:"Australia/Melbourne" = 2pm Melbourne (3am UTC)
     const startDateTime = request.startDateTime;
     const endDateTime = request.endDateTime;
+    
+    console.log(`📅 Booking time: ${startDateTime} (interpreted as ${businessTimezone})`);
+    
+    // Parse the datetime IN the business timezone for display
+    const startDateInTZ = parseDateInTimezone(startDateTime, businessTimezone);
+    console.log(`   This means: ${formatDateTimeInTimezone(startDateInTZ.toISOString(), businessTimezone)}`);
 
     // Step 4: Resolve contact information
     let contactEmail = request.contactEmail;
@@ -158,9 +168,10 @@ export async function createBooking(
       console.log(`⚠️ Warnings: ${validation.warnings.join(", ")}`);
     }
 
-    // Step 6: Check for conflicts (use converted business times)
-    const startDate = new Date(startDateTime);
-    const endDate = new Date(endDateTime);
+    // Step 6: Check for conflicts
+    // Parse dates in client timezone (customer's "2pm" is 2pm Melbourne, not 2pm UTC!)
+    const startDate = parseDateInTimezone(startDateTime, businessTimezone);
+    const endDate = parseDateInTimezone(endDateTime, businessTimezone);
 
     // Get existing events for conflict detection (use agent's calendar)
     const eventsResult =
@@ -328,8 +339,9 @@ export async function findAvailableTimeSlots(
     );
 
     const timezone = officeHours?.timezone || "Australia/Melbourne";
-    const startDate = new Date(request.startDateTime);
-    const endDate = new Date(request.endDateTime);
+    // Parse dates in client timezone
+    const startDate = parseDateInTimezone(request.startDateTime, timezone);
+    const endDate = parseDateInTimezone(request.endDateTime, timezone);
 
     // Validate time
     const futureCheck = isValidFutureTime(startDate, 15);

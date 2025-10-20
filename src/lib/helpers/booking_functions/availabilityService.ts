@@ -217,17 +217,21 @@ export async function getAgentOfficeHoursByAgentId(
 
 /**
  * Validate if a time slot is within office hours
+ * 
+ * IMPORTANT: If dateTime is a Date object created from an ISO string without timezone,
+ * it will be interpreted as UTC. We need to format it in the target timezone.
  */
 export function isWithinOfficeHours(
   dateTime: Date,
   officeHours: Record<string, { start: string; end: string; enabled: boolean }>,
-  timezone: string = "Australia/Melbourne"
+  timezone: string
 ): { isWithin: boolean; reason?: string } {
   if (!officeHours) {
     return { isWithin: true };
   }
 
   try {
+    // Format the date in the specified timezone to get local time components
     const dayOfWeek = dateTime
       .toLocaleDateString("en-US", {
         weekday: "long",

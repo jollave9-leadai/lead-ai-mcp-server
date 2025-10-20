@@ -17,6 +17,7 @@ import {
   calculateDurationMinutes,
 } from "./availabilityService";
 import { isValidEmail } from "./contactLookupService";
+import { parseDateInTimezone } from "./parseDateInTimezone";
 
 /**
  * Check for conflicts with existing calendar events
@@ -107,8 +108,9 @@ export function validateBookingRequest({
   let endDate: Date;
 
   try {
-    startDate = new Date(startDateTime);
-    endDate = new Date(endDateTime);
+    // Parse dates IN the target timezone (important: customer's "2pm" means 2pm in client TZ, not UTC!)
+    startDate = parseDateInTimezone(startDateTime, timezone || "Australia/Melbourne");
+    endDate = parseDateInTimezone(endDateTime, timezone || "Australia/Melbourne");
 
     if (isNaN(startDate.getTime())) {
       errors.push("Invalid start date format");
