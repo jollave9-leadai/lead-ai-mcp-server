@@ -21,6 +21,9 @@ import { parseDateInTimezone } from "./parseDateInTimezone";
 
 /**
  * Check for conflicts with existing calendar events
+ * 
+ * IMPORTANT: Both requested times and event times must be in the same timezone context
+ * Graph API returns times in the timezone specified by the event.start.timeZone field
  */
 export function checkEventConflicts(
   requestedStart: Date,
@@ -35,11 +38,14 @@ export function checkEventConflicts(
   }> = [];
 
   for (const event of existingEvents) {
-    const eventStart = new Date(event.start.dateTime);
-    const eventEnd = new Date(event.end.dateTime);
+    // Parse event times in their specified timezone
+    // Graph API includes timezone info in event.start.timeZone
+    const eventTimezone = event.start.timeZone || "Australia/Melbourne";
+    const eventStart = parseDateInTimezone(event.start.dateTime, eventTimezone);
+    const eventEnd = parseDateInTimezone(event.end.dateTime, eventTimezone);
 
-    // Check for overlap
-    if (requestedStart < eventEnd && requestedEnd > eventStart) {
+    // Check for overlap using UTC timestamps (timezone-agnostic comparison)
+    if (requestedStart.getTime() < eventEnd.getTime() && requestedEnd.getTime() > eventStart.getTime()) {
       conflicts.push({
         id: event.id,
         subject: event.subject,
