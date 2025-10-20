@@ -45,6 +45,15 @@ export {
   calculateBookingConfidence,
 } from "./conflictDetectionService";
 
+// Timezone Service
+export {
+  convertCustomerTimeToBusinessTime,
+  formatDateTimeInTimezone,
+  isValidTimezone,
+  normalizeTimezone,
+  COMMON_TIMEZONES,
+} from "./timezoneService";
+
 // Booking Operations (Main Service)
 export {
   createBooking,

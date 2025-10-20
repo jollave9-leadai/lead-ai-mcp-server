@@ -34,6 +34,12 @@ import {
   calculateBookingConfidence,
 } from "./conflictDetectionService";
 import { getCalendarConnectionByAgentId } from "./calendarConnectionService";
+import {
+  convertCustomerTimeToBusinessTime,
+  formatDateTimeInTimezone,
+  normalizeTimezone,
+  isValidTimezone,
+} from "./timezoneService";
 import { FinalOptimizedCalendarOperations } from "../calendar_functions/finalOptimizedCalendarOperations";
 
 /**
@@ -66,9 +72,50 @@ export async function createBooking(
       request.clientId
     );
 
-    const timezone = officeHours?.timezone || "Australia/Melbourne";
+    const businessTimezone = officeHours?.timezone || "Australia/Melbourne";
 
-    // Step 3: Resolve contact information
+    // Step 3: Handle timezone conversion if customer timezone provided
+    let startDateTime = request.startDateTime;
+    let endDateTime = request.endDateTime;
+    let customerTimezone: string | undefined;
+
+    if (request.customerTimezone) {
+      customerTimezone = normalizeTimezone(request.customerTimezone);
+      
+      if (!isValidTimezone(customerTimezone)) {
+        console.log(`⚠️ Invalid customer timezone: ${request.customerTimezone}`);
+        return {
+          success: false,
+          error: `Invalid timezone: "${request.customerTimezone}". Please provide a valid timezone like "America/New_York", "EST", or "Eastern".`,
+        };
+      }
+
+      console.log(`🌍 Converting time from customer timezone (${customerTimezone}) to business timezone (${businessTimezone})`);
+      console.log(`   Customer time: ${request.startDateTime} - ${request.endDateTime}`);
+      
+      // Convert times from customer timezone to business timezone
+      startDateTime = convertCustomerTimeToBusinessTime(
+        request.startDateTime,
+        customerTimezone,
+        businessTimezone
+      );
+      endDateTime = convertCustomerTimeToBusinessTime(
+        request.endDateTime,
+        customerTimezone,
+        businessTimezone
+      );
+      
+      console.log(`   Business time: ${startDateTime} - ${endDateTime}`);
+      
+      // Show human-readable times for confirmation
+      const customerStartFormatted = formatDateTimeInTimezone(startDateTime, customerTimezone);
+      const businessStartFormatted = formatDateTimeInTimezone(startDateTime, businessTimezone);
+      console.log(`   📅 ${customerStartFormatted} (customer) = ${businessStartFormatted} (business)`);
+    } else {
+      console.log(`🌍 No customer timezone provided, assuming times are in business timezone (${businessTimezone})`);
+    }
+
+    // Step 4: Resolve contact information
     let contactEmail = request.contactEmail;
     let contactName = request.contactName || "Unknown";
     let contactFound = false;
@@ -105,15 +152,15 @@ export async function createBooking(
       };
     }
 
-    // Step 4: Validate booking request
+    // Step 5: Validate booking request (use converted business times)
     const validation = validateBookingRequest({
       subject: request.subject,
-      startDateTime: request.startDateTime,
-      endDateTime: request.endDateTime,
+      startDateTime,
+      endDateTime,
       contactEmail,
       contactName,
       officeHours: officeHours?.schedule,
-      timezone,
+      timezone: businessTimezone,
     });
 
     if (!validation.isValid) {
@@ -128,9 +175,9 @@ export async function createBooking(
       console.log(`⚠️ Warnings: ${validation.warnings.join(", ")}`);
     }
 
-    // Step 5: Check for conflicts
-    const startDate = new Date(request.startDateTime);
-    const endDate = new Date(request.endDateTime);
+    // Step 6: Check for conflicts (use converted business times)
+    const startDate = new Date(startDateTime);
+    const endDate = new Date(endDateTime);
 
     // Get existing events for conflict detection (use agent's calendar)
     const eventsResult =
@@ -138,8 +185,8 @@ export async function createBooking(
         request.clientId,
         {
           clientId: request.clientId,
-          startDate: request.startDateTime,
-          endDate: request.endDateTime,
+          startDate: startDateTime,
+          endDate: endDateTime,
           calendarId: request.calendarId,
         },
         connection.id // Pass the agent's calendar connection ID
@@ -166,7 +213,7 @@ export async function createBooking(
               searchRange.start,
               searchRange.end,
               officeHours.schedule,
-              timezone,
+              businessTimezone,
               Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60))
             )
           : [];
@@ -188,14 +235,14 @@ export async function createBooking(
           error: "Time slot has conflicts",
           conflictDetails: formatConflictDetails(
             conflictCheck.conflictingEvents || [],
-            timezone
+            businessTimezone
           ),
           availableSlots: alternatives,
         };
       }
     }
 
-    // Step 6: Create the calendar event (use agent's calendar)
+    // Step 7: Create the calendar event (use agent's calendar with converted times)
     console.log("✅ No conflicts, creating event...");
 
     const createResult =
@@ -204,8 +251,8 @@ export async function createBooking(
         {
           clientId: request.clientId,
           subject: request.subject,
-          startDateTime: request.startDateTime,
-          endDateTime: request.endDateTime,
+          startDateTime, // Use converted business timezone
+          endDateTime, // Use converted business timezone
           attendeeEmail: contactEmail,
           attendeeName: contactName,
           description: request.description,
@@ -241,8 +288,8 @@ export async function createBooking(
       booking: {
         eventId: createResult.eventId || "",
         subject: request.subject,
-        startDateTime: request.startDateTime,
-        endDateTime: request.endDateTime,
+        startDateTime, // Return business timezone
+        endDateTime, // Return business timezone
         contact: contactFound
           ? { name: contactName, email: contactEmail, source: "customer" }
           : createManualContact(contactName, contactEmail, request.contactPhone),

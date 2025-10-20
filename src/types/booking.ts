@@ -48,6 +48,7 @@ export interface BookingRequest {
   subject: string
   startDateTime: string
   endDateTime: string
+  customerTimezone?: string // Customer's timezone (e.g., 'America/New_York')
   contactName?: string
   contactEmail?: string
   contactPhone?: string

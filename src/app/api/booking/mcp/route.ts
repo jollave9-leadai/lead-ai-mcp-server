@@ -47,6 +47,12 @@ const handler = createMcpHandler(
           .describe(
             "End time in ISO format: '2025-10-20T14:00:00' (must be after start time)"
           ),
+        customerTimezone: z
+          .string()
+          .optional()
+          .describe(
+            "Customer's timezone (e.g., 'America/New_York', 'EST', 'Pacific', 'AEST'). If provided, times will be converted from customer timezone to business timezone. If not provided, times are assumed to be in business timezone."
+          ),
         contactName: z
           .string()
           .optional()
@@ -130,6 +136,7 @@ const handler = createMcpHandler(
             subject: input.subject,
             startDateTime: input.startDateTime,
             endDateTime: input.endDateTime,
+            customerTimezone: input.customerTimezone,
             contactName: input.contactName,
             contactEmail: input.contactEmail,
             contactPhone: input.contactPhone,
