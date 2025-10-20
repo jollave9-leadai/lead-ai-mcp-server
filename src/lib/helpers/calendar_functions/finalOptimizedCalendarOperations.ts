@@ -21,7 +21,8 @@ export class FinalOptimizedCalendarOperations {
    */
   static async getCalendarEventsForClient(
     clientId: number,
-    request: GetGraphEventsRequest
+    request: GetGraphEventsRequest,
+    calendarConnectionId?: string
   ): Promise<{
     success: boolean
     events?: GraphEvent[]
@@ -29,8 +30,8 @@ export class FinalOptimizedCalendarOperations {
     error?: string
   }> {
     try {
-      // Get all client data with advanced caching
-      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
+      // Get all client data with advanced caching (use specific calendar connection if provided)
+      const clientData = await AdvancedCacheService.getClientCalendarData(clientId, calendarConnectionId)
       if (!clientData) {
         return {
           success: false,
@@ -100,7 +101,8 @@ export class FinalOptimizedCalendarOperations {
    */
   static async createCalendarEventForClient(
     clientId: number,
-    request: CreateGraphEventMCPRequest
+    request: CreateGraphEventMCPRequest,
+    calendarConnectionId?: string
   ): Promise<{
     success: boolean
     event?: GraphEvent
@@ -115,8 +117,8 @@ export class FinalOptimizedCalendarOperations {
     }>
   }> {
     try {
-      // Get all client data with advanced caching
-      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
+      // Get all client data with advanced caching (use specific calendar connection if provided)
+      const clientData = await AdvancedCacheService.getClientCalendarData(clientId, calendarConnectionId)
       if (!clientData) {
         return {
           success: false,

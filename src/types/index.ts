@@ -28,3 +28,16 @@ export type {
   AvailabilitySlot,
   AvailabilityResponse,
 } from "./microsoft-graph";
+export type {
+  ContactInfo,
+  ContactSearchResult,
+  TimeSlot,
+  ConflictCheckResult,
+  BookingValidationResult,
+  BookingRequest,
+  BookingResponse,
+  AvailabilityCheckRequest,
+  AvailabilityCheckResponse,
+  AgentOfficeHours,
+  CalendarConnectionStatus,
+} from "./booking";

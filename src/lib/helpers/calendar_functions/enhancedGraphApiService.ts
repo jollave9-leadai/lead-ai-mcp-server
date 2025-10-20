@@ -207,8 +207,6 @@ export class EnhancedGraphApiService {
       endpoint += `?${params.toString()}`
     }
 
-    console.log(`🔍 Enhanced Graph request: ${fieldSet} fields, max ${maxResults} results`)
-
     const requestStart = Date.now()
     const response = await makeGraphRequest(connection, endpoint, {}, timeZone)
     const requestDuration = Date.now() - requestStart

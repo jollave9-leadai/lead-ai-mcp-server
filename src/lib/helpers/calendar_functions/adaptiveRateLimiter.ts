@@ -65,7 +65,6 @@ export class AdaptiveRateLimiter {
     // Check if we're in backoff period
     if (now < this.state.backoffUntil) {
       const waitTime = this.state.backoffUntil - now
-      console.log(`⏳ Rate limiter: Backing off for ${waitTime}ms`)
       await this.sleep(waitTime)
     }
 
@@ -78,7 +77,6 @@ export class AdaptiveRateLimiter {
     if (this.state.requestCount >= this.state.currentLimit) {
       const waitTime = this.state.windowSizeMs - (now - this.state.windowStart)
       if (waitTime > 0) {
-        console.log(`⏳ Rate limiter: Waiting ${waitTime}ms for window reset`)
         await this.sleep(waitTime)
         this.resetWindow()
       }
@@ -131,8 +129,6 @@ export class AdaptiveRateLimiter {
       this.config.minLimit,
       Math.min(this.config.maxLimit, this.state.currentLimit)
     )
-
-    console.log(`📊 Rate limiter: Status ${response.status}, Limit: ${this.state.currentLimit}`)
   }
 
   private handleRateLimit(retryAfter?: number): void {
@@ -150,8 +146,6 @@ export class AdaptiveRateLimiter {
         )
     
     this.state.backoffUntil = Date.now() + backoffTime
-    
-    console.log(`🚨 Rate limited! Reduced limit to ${this.state.currentLimit}, backing off for ${backoffTime}ms`)
   }
 
   private handleServerError(): void {
@@ -162,8 +156,6 @@ export class AdaptiveRateLimiter {
     
     // Short backoff
     this.state.backoffUntil = Date.now() + (1000 * this.state.consecutiveErrors)
-    
-    console.log(`⚠️ Server error! Reduced limit to ${this.state.currentLimit}`)
   }
 
   private handleClientError(): void {
@@ -182,8 +174,6 @@ export class AdaptiveRateLimiter {
       // Conservative increase
       const increase = Math.max(1, Math.floor(this.state.currentLimit * this.config.adaptationFactor))
       this.state.currentLimit += increase
-      
-      console.log(`✅ High success rate (${(recentSuccessRate * 100).toFixed(1)}%), increased limit to ${this.state.currentLimit}`)
     }
   }
 
@@ -360,8 +350,6 @@ export class SmartRequestBatcher<T> {
         item.reject(error instanceof Error ? error : new Error('Batch processing failed'))
       }
     })
-
-    console.log(`📦 Processed batch of ${batch.length} requests`)
   }
 
   private estimateRequestSize(request: T): number {
