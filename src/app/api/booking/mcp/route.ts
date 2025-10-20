@@ -34,10 +34,10 @@ const handler = createMcpHandler(
           .describe("Agent ID number (e.g., 123) - identifies which agent's calendar to check"),
         requestedStartTime: z
           .string()
-          .describe("Preferred start time: '2025-10-20T13:00:00'"),
+          .describe("Preferred start time in full ISO 8601 format with timezone, e.g. '2025-10-20T13:00:00+08:00'"),
         requestedEndTime: z
           .string()
-          .describe("Preferred end time: '2025-10-20T14:00:00'"),
+          .describe("Preferred end time in full ISO 8601 format with timezone, e.g. '2025-10-20T14:00:00+08:00'"),
         durationMinutes: z
           .number()
           .optional()
@@ -297,10 +297,10 @@ const handler = createMcpHandler(
           .describe("Meeting title (e.g., 'Sales Call with John Smith')"),
         startDateTime: z
           .string()
-          .describe("Start time in ISO format: '2025-10-20T13:00:00'"),
+          .describe("Preferred end time in full ISO 8601 format with timezone, e.g. '2025-10-20T14:00:00+08:00'"),
         endDateTime: z
           .string()
-          .describe("End time in ISO format: '2025-10-20T14:00:00'"),
+          .describe("Preferred end time in full ISO 8601 format with timezone, e.g. '2025-10-20T14:00:00+08:00'"),
         contactName: z
           .string()
           .describe("Contact name: 'John Smith'"),
