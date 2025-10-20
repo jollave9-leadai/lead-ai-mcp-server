@@ -1,230 +1,24 @@
 /**
  * Booking MCP Server Route
  * 
- * Provides 3 MCP tools for AI agents to book appointments:
- * 1. CreateCalendarEvent - Book appointments with contact lookup and conflict detection
- * 2. FindAvailableSlots - Check availability and get alternative time slots
- * 3. GetAvailability - Get detailed availability information
+ * Provides 3 MCP tools for AI agents:
+ * 1. FindAvailableSlots - Check availability and get alternative time slots
+ * 2. GetAvailability - Get detailed availability information
+ * 3. CreateBooking - Create a confirmed calendar booking
  */
 
 import { z } from "zod";
 import { createMcpHandler } from "mcp-handler";
 import {
-  createBooking,
   findAvailableTimeSlots,
   getDetailedAvailability,
+  createBooking,
 } from "@/lib/helpers/booking_functions";
 
 const handler = createMcpHandler(
   (server) => {
     /**
-     * Tool 1: CreateCalendarEvent
-     * 
-     * Book appointments with automatic contact lookup, conflict detection,
-     * and office hours validation.
-     */
-    server.tool(
-      "CreateCalendarEvent",
-      "Book a calendar appointment with automatic contact search in customer/lead databases. Validates office hours, detects conflicts, and suggests alternatives. Creates Teams meetings by default.",
-      {
-        clientId: z
-          .union([z.number(), z.string().transform(Number)])
-          .describe("Client ID number (e.g., 10000002)"),
-        agentId: z
-          .union([z.number(), z.string().transform(Number)])
-          .describe("Agent ID number (e.g., 123) - identifies which agent's calendar to use"),
-        subject: z
-          .string()
-          .min(3)
-          .describe("Meeting title (e.g., 'Sales Call with John Smith')"),
-        startDateTime: z
-          .string()
-          .describe(
-            "Start time in ISO format: '2025-10-20T13:00:00' (must be at least 15 minutes in future)"
-          ),
-        endDateTime: z
-          .string()
-          .describe(
-            "End time in ISO format: '2025-10-20T14:00:00' (must be after start time)"
-          ),
-        customerTimezone: z
-          .string()
-          .optional()
-          .describe(
-            "Customer's timezone (e.g., 'America/New_York', 'EST', 'Pacific', 'AEST'). If provided, times will be converted from customer timezone to business timezone. If not provided, times are assumed to be in business timezone."
-          ),
-        contactName: z
-          .string()
-          .optional()
-          .describe(
-            "Contact name to search in database: 'John Smith' (searches customers and leads automatically)"
-          ),
-        contactEmail: z
-          .string()
-          .email()
-          .optional()
-          .describe(
-            "Contact email: 'john@company.com' (required if contact not found in database)"
-          ),
-        contactPhone: z
-          .string()
-          .optional()
-          .describe("Contact phone number (optional, for reference)"),
-        description: z
-          .string()
-          .optional()
-          .describe("Meeting description or agenda (optional)"),
-        location: z
-          .string()
-          .optional()
-          .describe(
-            "Meeting location: 'Conference Room A' or physical address (optional)"
-          ),
-        isOnlineMeeting: z
-          .boolean()
-          .optional()
-          .default(true)
-          .describe("Create Teams meeting link: true/false (default: true)"),
-        calendarId: z
-          .string()
-          .optional()
-          .describe("Specific calendar ID (optional, uses primary calendar if not specified)"),
-      },
-      async (input) => {
-        try {
-          console.log("📅 CreateCalendarEvent MCP Tool called");
-          console.table(input);
-
-          // Validate and convert clientId
-          const numericClientId =
-            typeof input.clientId === "string"
-              ? parseInt(input.clientId, 10)
-              : input.clientId;
-
-          if (!numericClientId || isNaN(numericClientId)) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: "❌ **ERROR**: Client ID is required and must be a valid number",
-                },
-              ],
-            };
-          }
-
-          // Validate and convert agentId
-          const numericAgentId =
-            typeof input.agentId === "string"
-              ? parseInt(input.agentId, 10)
-              : input.agentId;
-
-          if (!numericAgentId || isNaN(numericAgentId)) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: "❌ **ERROR**: Agent ID is required and must be a valid number",
-                },
-              ],
-            };
-          }
-
-          // Create booking
-          const result = await createBooking({
-            clientId: numericClientId,
-            agentId: numericAgentId,
-            subject: input.subject,
-            startDateTime: input.startDateTime,
-            endDateTime: input.endDateTime,
-            customerTimezone: input.customerTimezone,
-            contactName: input.contactName,
-            contactEmail: input.contactEmail,
-            contactPhone: input.contactPhone,
-            description: input.description,
-            location: input.location,
-            isOnlineMeeting: input.isOnlineMeeting,
-            calendarId: input.calendarId,
-          });
-
-          // Handle failure with conflict suggestions
-          if (!result.success) {
-            if (result.availableSlots && result.availableSlots.length > 0) {
-              let responseText = "❌ **SCHEDULING CONFLICT**\n\n";
-              responseText += `**Issue**: ${result.error}\n\n`;
-
-              if (result.conflictDetails) {
-                responseText += `**Conflicting Events**:\n${result.conflictDetails}\n\n`;
-              }
-
-              responseText += `**💡 ALTERNATIVE TIME SLOTS**:\n`;
-              result.availableSlots.forEach((slot, index) => {
-                responseText += `${index + 1}. ${slot.startFormatted} - ${slot.endFormatted}\n`;
-              });
-              responseText += `\nPlease choose one of these alternative times and try booking again.`;
-
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: responseText,
-                  },
-                ],
-              };
-            }
-
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `❌ **BOOKING FAILED**\n\n**Error**: ${result.error}`,
-                },
-              ],
-            };
-          }
-
-          // Success response
-          const booking = result.booking!;
-          let responseText = "✅ **APPOINTMENT BOOKED SUCCESSFULLY!**\n\n";
-          responseText += `📋 **${booking.subject}**\n`;
-          responseText += `📅 **Date/Time**: ${new Date(booking.startDateTime).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} - ${new Date(booking.endDateTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}\n`;
-          responseText += `👤 **Contact**: ${booking.contact.name}\n`;
-          responseText += `📧 **Email**: ${booking.contact.email}\n`;
-
-          if (booking.location) {
-            responseText += `📍 **Location**: ${booking.location}\n`;
-          }
-
-          if (booking.teamsLink) {
-            responseText += `💻 **Teams Meeting**: ${booking.teamsLink}\n`;
-          }
-
-          responseText += `\n🆔 **Event ID**: ${booking.eventId}\n`;
-          responseText += `\n✉️ **Invitation sent** to ${booking.contact.email}`;
-
-          return {
-            content: [
-              {
-                type: "text",
-                text: responseText,
-              },
-            ],
-          };
-        } catch (error) {
-          console.error("Error in CreateCalendarEvent:", error);
-          return {
-            content: [
-              {
-                type: "text",
-                text: `❌ **UNEXPECTED ERROR**\n\n${error instanceof Error ? error.message : "Unknown error occurred"}`,
-              },
-            ],
-          };
-        }
-      }
-    );
-
-    /**
-     * Tool 2: FindAvailableSlots
+     * Tool 1: FindAvailableSlots
      * 
      * Check if a time slot is available and get alternative suggestions
      */
@@ -470,6 +264,169 @@ const handler = createMcpHandler(
           };
         } catch (error) {
           console.error("Error in GetAvailability:", error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ **UNEXPECTED ERROR**\n\n${error instanceof Error ? error.message : "Unknown error occurred"}`,
+              },
+            ],
+          };
+        }
+      }
+    );
+
+    /**
+     * Tool 3: CreateBooking
+     * 
+     * Create a confirmed calendar booking after availability has been checked
+     */
+    server.tool(
+      "CreateBooking",
+      "Create a confirmed calendar booking. Use this ONLY after checking availability with FindAvailableSlots. Creates Teams meeting by default.",
+      {
+        clientId: z
+          .union([z.number(), z.string().transform(Number)])
+          .describe("Client ID number (e.g., 10000002)"),
+        agentId: z
+          .union([z.number(), z.string().transform(Number)])
+          .describe("Agent ID number (e.g., 123)"),
+        subject: z
+          .string()
+          .min(3)
+          .describe("Meeting title (e.g., 'Sales Call with John Smith')"),
+        startDateTime: z
+          .string()
+          .describe("Start time in ISO format: '2025-10-20T13:00:00'"),
+        endDateTime: z
+          .string()
+          .describe("End time in ISO format: '2025-10-20T14:00:00'"),
+        contactName: z
+          .string()
+          .describe("Contact name: 'John Smith'"),
+        contactEmail: z
+          .string()
+          .email()
+          .optional()
+          .describe("Contact email: 'john@company.com' (optional - will check database first)"),
+        contactPhone: z
+          .string()
+          .optional()
+          .describe("Contact phone number (optional)"),
+        description: z
+          .string()
+          .optional()
+          .describe("Meeting description or agenda (optional)"),
+        location: z
+          .string()
+          .optional()
+          .describe("Meeting location (optional)"),
+        isOnlineMeeting: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe("Create Teams meeting link (default: true)"),
+      },
+      async (input) => {
+        try {
+          console.log("📅 CreateBooking MCP Tool called");
+          console.table(input);
+
+          const numericClientId =
+            typeof input.clientId === "string"
+              ? parseInt(input.clientId, 10)
+              : input.clientId;
+
+          if (!numericClientId || isNaN(numericClientId)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "❌ **ERROR**: Client ID is required and must be a valid number",
+                },
+              ],
+            };
+          }
+
+          const numericAgentId =
+            typeof input.agentId === "string"
+              ? parseInt(input.agentId, 10)
+              : input.agentId;
+
+          if (!numericAgentId || isNaN(numericAgentId)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "❌ **ERROR**: Agent ID is required and must be a valid number",
+                },
+              ],
+            };
+          }
+
+          // Create booking
+          const result = await createBooking({
+            clientId: numericClientId,
+            agentId: numericAgentId,
+            subject: input.subject,
+            startDateTime: input.startDateTime,
+            endDateTime: input.endDateTime,
+            contactName: input.contactName,
+            contactEmail: input.contactEmail,
+            contactPhone: input.contactPhone,
+            description: input.description,
+            location: input.location,
+            isOnlineMeeting: input.isOnlineMeeting,
+          });
+
+          if (!result.success) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `❌ **BOOKING FAILED**\n\n**Error**: ${result.error}`,
+                },
+              ],
+            };
+          }
+
+          // Success response
+          const booking = result.booking!;
+          let responseText = "✅ **APPOINTMENT BOOKED SUCCESSFULLY!**\n\n";
+          responseText += `📋 **${booking.subject}**\n`;
+          responseText += `📅 **Date/Time**: ${new Date(booking.startDateTime).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} - ${new Date(booking.endDateTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}\n`;
+          responseText += `👤 **Contact**: ${booking.contact.name}\n`;
+          
+          if (booking.contact.email) {
+            responseText += `📧 **Email**: ${booking.contact.email}\n`;
+          } else {
+            responseText += `⚠️ **No email provided** - Invitation not sent\n`;
+          }
+
+          if (booking.location) {
+            responseText += `📍 **Location**: ${booking.location}\n`;
+          }
+
+          if (booking.teamsLink) {
+            responseText += `💻 **Teams Meeting**: ${booking.teamsLink}\n`;
+          }
+
+          responseText += `\n🆔 **Event ID**: ${booking.eventId}\n`;
+          
+          if (booking.contact.email) {
+            responseText += `\n✉️ **Invitation sent** to ${booking.contact.email}`;
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: responseText,
+              },
+            ],
+          };
+        } catch (error) {
+          console.error("Error in CreateBooking:", error);
           return {
             content: [
               {

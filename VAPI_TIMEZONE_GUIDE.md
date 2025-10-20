@@ -1,4 +1,6 @@
-# VAPI Booking with Timezone Support (Simplified)
+# VAPI Booking MCP - Slot Suggestions Only (UPDATED)
+
+> ⚠️ **IMPORTANT**: This MCP now only provides slot suggestions. It does NOT create bookings.
 
 ## Overview
 The booking MCP now supports timezone-aware scheduling. **Microsoft Graph API handles all timezone conversions automatically** via the `Prefer: outlook.timezone` header.

@@ -266,7 +266,7 @@ export interface CreateGraphEventMCPRequest {
   subject: string
   startDateTime: string
   endDateTime: string
-  attendeeEmail: string
+  attendeeEmail?: string
   attendeeName?: string
   description?: string
   location?: string

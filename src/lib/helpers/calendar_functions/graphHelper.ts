@@ -15,6 +15,40 @@ import { DateTime } from "luxon"
 const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0'
 
 /**
+ * Convert Windows timezone to IANA timezone format
+ * Graph API returns Windows timezone names, JavaScript needs IANA format
+ */
+export function convertFromWindowsTimezone(windowsTimezone: string): string {
+  const reverseMapping: Record<string, string> = {
+    'AUS Eastern Standard Time': 'Australia/Melbourne',
+    'E. Australia Standard Time': 'Australia/Brisbane',
+    'W. Australia Standard Time': 'Australia/Perth',
+    'Cen. Australia Standard Time': 'Australia/Adelaide',
+    'AUS Central Standard Time': 'Australia/Darwin',
+    'Tasmania Standard Time': 'Australia/Hobart',
+    'Eastern Standard Time': 'America/New_York',
+    'Central Standard Time': 'America/Chicago',
+    'Mountain Standard Time': 'America/Denver',
+    'Pacific Standard Time': 'America/Los_Angeles',
+    'GMT Standard Time': 'Europe/London',
+    'W. Europe Standard Time': 'Europe/Paris',
+    'Central European Standard Time': 'Europe/Warsaw',
+    'FLE Standard Time': 'Europe/Helsinki',
+    'Russian Standard Time': 'Europe/Moscow',
+    'Singapore Standard Time': 'Asia/Singapore',
+    'SE Asia Standard Time': 'Asia/Bangkok',
+    'China Standard Time': 'Asia/Shanghai',
+    'Tokyo Standard Time': 'Asia/Tokyo',
+    'Korea Standard Time': 'Asia/Seoul',
+    'India Standard Time': 'Asia/Kolkata',
+    'Arabian Standard Time': 'Asia/Dubai',
+    'UTC': 'UTC',
+  };
+
+  return reverseMapping[windowsTimezone] || windowsTimezone;
+}
+
+/**
  * Convert IANA timezone to Windows timezone identifier for Microsoft Graph
  */
 function convertToWindowsTimezone(ianaTimezone: string): string {

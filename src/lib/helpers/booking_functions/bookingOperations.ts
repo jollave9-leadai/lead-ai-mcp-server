@@ -113,7 +113,8 @@ export async function createBooking(
     let contactName = request.contactName || "Unknown";
     let contactFound = false;
 
-    if (request.contactName && !request.contactEmail) {
+    // Always try to find contact in database if name is provided
+    if (request.contactName) {
       console.log(`🔍 Searching for contact: ${request.contactName}`);
       const contactSearch = await searchContactByName(
         request.contactName,
@@ -121,27 +122,31 @@ export async function createBooking(
       );
 
       if (contactSearch.found && contactSearch.contact) {
-        contactEmail = contactSearch.contact.email;
+        // Found exact match - use database info
+        contactEmail = contactSearch.contact.email || contactEmail; // Use DB email if available
         contactName = contactSearch.contact.name;
         contactFound = true;
-        console.log(`✅ Found contact: ${contactName} (${contactEmail})`);
+        console.log(`✅ Found contact in database: ${contactName}${contactEmail ? ` (${contactEmail})` : ' (no email)'}`);
       } else if (contactSearch.matches && contactSearch.matches.length > 0) {
+        // Multiple matches - ask for clarification
         return {
           success: false,
           error: `Multiple contacts found for "${request.contactName}". Please specify email address. Found: ${contactSearch.matches.map((m) => `${m.name} (${m.email})`).join(", ")}`,
         };
       } else {
-        return {
-          success: false,
-          error: `Contact "${request.contactName}" not found. Please provide email address.`,
-        };
+        // Not found in database - use provided info or proceed without email
+        console.log(`ℹ️ Contact not found in database. Proceeding with provided information.`);
+        if (!contactEmail) {
+          console.log(`⚠️ No email address available for this booking`);
+        }
       }
     }
 
-    if (!contactEmail) {
+    // Contact name is required, but email is optional
+    if (!contactName || contactName === "Unknown") {
       return {
         success: false,
-        error: "Contact email is required",
+        error: "Contact name is required",
       };
     }
 
@@ -173,14 +178,20 @@ export async function createBooking(
     const startDate = parseDateInTimezone(startDateTime, businessTimezone);
     const endDate = parseDateInTimezone(endDateTime, businessTimezone);
 
+    // Expand search range to catch overlapping events
+    const searchStart = new Date(startDate);
+    searchStart.setHours(searchStart.getHours() - 2); // Look 2 hours before
+    const searchEnd = new Date(endDate);
+    searchEnd.setHours(searchEnd.getHours() + 2); // Look 2 hours after
+
     // Get existing events for conflict detection (use agent's calendar)
     const eventsResult =
       await FinalOptimizedCalendarOperations.getCalendarEventsForClient(
         request.clientId,
         {
           clientId: request.clientId,
-          startDate: startDateTime,
-          endDate: endDateTime,
+          startDate: searchStart.toISOString().slice(0, 19),
+          endDate: searchEnd.toISOString().slice(0, 19),
           calendarId: request.calendarId,
         },
         connection.id // Pass the agent's calendar connection ID
@@ -247,7 +258,7 @@ export async function createBooking(
           subject: request.subject,
           startDateTime, // Use converted business timezone
           endDateTime, // Use converted business timezone
-          attendeeEmail: contactEmail,
+          attendeeEmail: contactEmail || undefined, // Optional - only include if available
           attendeeName: contactName,
           description: request.description,
           location: request.location,
@@ -270,7 +281,7 @@ export async function createBooking(
       isWithinOfficeHours: true,
       hasNoConflicts: true,
       isReasonableDuration: true,
-      hasValidEmail: isValidEmail(contactEmail),
+      hasValidEmail: contactEmail ? isValidEmail(contactEmail) : false,
     });
 
     console.log(
@@ -285,8 +296,8 @@ export async function createBooking(
         startDateTime, // Return business timezone
         endDateTime, // Return business timezone
         contact: contactFound
-          ? { name: contactName, email: contactEmail, source: "customer" }
-          : createManualContact(contactName, contactEmail, request.contactPhone),
+          ? { name: contactName, email: contactEmail || "", source: "customer" }
+          : createManualContact(contactName, contactEmail || "", request.contactPhone),
         teamsLink: createResult.event?.onlineMeeting?.joinUrl,
         location: request.location,
       },
@@ -386,22 +397,41 @@ export async function findAvailableTimeSlots(
     }
 
     // Get existing events (use agent's calendar)
+    // Expand search range to catch events that might overlap
+    // Graph API calendarView endpoint may not include events at exact boundaries
+    const searchStart = new Date(request.startDateTime);
+    searchStart.setHours(searchStart.getHours() - 2); // Look 2 hours before
+    const searchEnd = new Date(request.endDateTime);
+    searchEnd.setHours(searchEnd.getHours() + 2); // Look 2 hours after
+
     const eventsResult =
       await FinalOptimizedCalendarOperations.getCalendarEventsForClient(
         request.clientId,
         {
           clientId: request.clientId,
-          startDate: request.startDateTime,
-          endDate: request.endDateTime,
+          startDate: searchStart.toISOString().slice(0, 19), // Remove .000Z
+          endDate: searchEnd.toISOString().slice(0, 19),
         },
         connection.id // Pass the agent's calendar connection ID
       );
+
+    // Debug logging
+    console.log(`📊 Events retrieved: ${eventsResult.events?.length || 0}`);
+    if (eventsResult.events && eventsResult.events.length > 0) {
+      console.log('📅 Existing events:');
+      eventsResult.events.forEach(event => {
+        console.log(`   - ${event.subject}: ${event.start.dateTime} to ${event.end.dateTime} (TZ: ${event.start.timeZone})`);
+      });
+    }
+    console.log(`🔍 Checking conflict for: ${startDate.toISOString()} to ${endDate.toISOString()}`);
 
     const hasConflict =
       eventsResult.success && eventsResult.events
         ? checkEventConflicts(startDate, endDate, eventsResult.events)
             .hasConflict
         : false;
+
+    console.log(`⚠️  Has conflict: ${hasConflict}`);
 
     // If no conflict, requested slot is available
     if (!hasConflict) {

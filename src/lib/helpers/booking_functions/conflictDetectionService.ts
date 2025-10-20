@@ -18,6 +18,7 @@ import {
 } from "./availabilityService";
 import { isValidEmail } from "./contactLookupService";
 import { parseDateInTimezone } from "./parseDateInTimezone";
+import { convertFromWindowsTimezone } from "../calendar_functions/graphHelper";
 
 /**
  * Check for conflicts with existing calendar events
@@ -38,14 +39,37 @@ export function checkEventConflicts(
   }> = [];
 
   for (const event of existingEvents) {
-    // Parse event times in their specified timezone
-    // Graph API includes timezone info in event.start.timeZone
-    const eventTimezone = event.start.timeZone || "Australia/Melbourne";
-    const eventStart = parseDateInTimezone(event.start.dateTime, eventTimezone);
-    const eventEnd = parseDateInTimezone(event.end.dateTime, eventTimezone);
+    // Graph API returns Windows timezone format (e.g., "AUS Eastern Standard Time")
+    // Convert to IANA format for JavaScript compatibility
+    const windowsTimezone = event.start.timeZone || "Australia/Melbourne";
+    const eventTimezone = convertFromWindowsTimezone(windowsTimezone);
+    
+    // If dateTime ends with 'Z', it's already UTC
+    const eventStartStr = event.start.dateTime;
+    const eventEndStr = event.end.dateTime;
+    
+    let eventStart: Date;
+    let eventEnd: Date;
+    
+    if (eventStartStr.endsWith('Z')) {
+      // Already UTC, parse directly
+      eventStart = new Date(eventStartStr);
+      eventEnd = new Date(eventEndStr);
+      console.log(`   Event "${event.subject}" (UTC format): ${eventStart.toISOString()} to ${eventEnd.toISOString()}`);
+    } else {
+      // Local time, parse in timezone
+      eventStart = parseDateInTimezone(eventStartStr, eventTimezone);
+      eventEnd = parseDateInTimezone(eventEndStr, eventTimezone);
+      console.log(`   Event "${event.subject}" (Local format in ${eventTimezone}): ${eventStart.toISOString()} to ${eventEnd.toISOString()}`);
+    }
 
     // Check for overlap using UTC timestamps (timezone-agnostic comparison)
-    if (requestedStart.getTime() < eventEnd.getTime() && requestedEnd.getTime() > eventStart.getTime()) {
+    const hasOverlap = requestedStart.getTime() < eventEnd.getTime() && requestedEnd.getTime() > eventStart.getTime();
+    console.log(`   Requested: ${requestedStart.toISOString()} - ${requestedEnd.toISOString()}`);
+    console.log(`   Event: ${eventStart.toISOString()} - ${eventEnd.toISOString()}`);
+    console.log(`   Overlap: ${hasOverlap}`);
+    
+    if (hasOverlap) {
       conflicts.push({
         id: event.id,
         subject: event.subject,
@@ -186,18 +210,22 @@ export function validateBookingRequest({
   }
 
   // Validate contact information
-  if (!contactEmail && !contactName) {
-    errors.push(
-      "Either contact email or contact name must be provided"
-    );
-  }
-
-  if (contactEmail && !isValidEmail(contactEmail)) {
-    errors.push("Invalid email address format");
+  if (!contactName) {
+    errors.push("Contact name is required");
   }
 
   if (contactName && contactName.trim().length < 2) {
     errors.push("Contact name must be at least 2 characters");
+  }
+
+  // Email is optional but must be valid if provided
+  if (contactEmail && !isValidEmail(contactEmail)) {
+    errors.push("Invalid email address format");
+  }
+  
+  // Warn if no email provided
+  if (!contactEmail && contactName) {
+    warnings.push("No email address provided - invitation will not be sent");
   }
 
   return {
