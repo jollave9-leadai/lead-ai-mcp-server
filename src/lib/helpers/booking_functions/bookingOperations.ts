@@ -35,8 +35,6 @@ import {
 } from "./conflictDetectionService";
 import { getCalendarConnectionByAgentId } from "./calendarConnectionService";
 import {
-  convertCustomerTimeToBusinessTime,
-  formatDateTimeInTimezone,
   normalizeTimezone,
   isValidTimezone,
 } from "./timezoneService";
@@ -74,9 +72,8 @@ export async function createBooking(
 
     const businessTimezone = officeHours?.timezone || "Australia/Melbourne";
 
-    // Step 3: Handle timezone conversion if customer timezone provided
-    let startDateTime = request.startDateTime;
-    let endDateTime = request.endDateTime;
+    // Step 3: Validate customer timezone if provided
+    // Note: We don't convert times - Microsoft Graph API handles timezone via Prefer header
     let customerTimezone: string | undefined;
 
     if (request.customerTimezone) {
@@ -90,30 +87,16 @@ export async function createBooking(
         };
       }
 
-      console.log(`🌍 Converting time from customer timezone (${customerTimezone}) to business timezone (${businessTimezone})`);
-      console.log(`   Customer time: ${request.startDateTime} - ${request.endDateTime}`);
-      
-      // Convert times from customer timezone to business timezone
-      startDateTime = convertCustomerTimeToBusinessTime(
-        request.startDateTime,
-        customerTimezone,
-        businessTimezone
-      );
-      endDateTime = convertCustomerTimeToBusinessTime(
-        request.endDateTime,
-        customerTimezone,
-        businessTimezone
-      );
-      
-      console.log(`   Business time: ${startDateTime} - ${endDateTime}`);
-      
-      // Show human-readable times for confirmation
-      const customerStartFormatted = formatDateTimeInTimezone(startDateTime, customerTimezone);
-      const businessStartFormatted = formatDateTimeInTimezone(startDateTime, businessTimezone);
-      console.log(`   📅 ${customerStartFormatted} (customer) = ${businessStartFormatted} (business)`);
+      console.log(`🌍 Customer timezone: ${customerTimezone}, Business timezone: ${businessTimezone}`);
+      console.log(`   Customer provided time: ${request.startDateTime} - ${request.endDateTime}`);
+      console.log(`   📌 Microsoft Graph will handle timezone conversion automatically via Prefer header`);
     } else {
-      console.log(`🌍 No customer timezone provided, assuming times are in business timezone (${businessTimezone})`);
+      console.log(`🌍 No customer timezone provided, using business timezone: ${businessTimezone}`);
     }
+
+    // Use customer's datetime as-is (Graph API will handle timezone conversion)
+    const startDateTime = request.startDateTime;
+    const endDateTime = request.endDateTime;
 
     // Step 4: Resolve contact information
     let contactEmail = request.contactEmail;

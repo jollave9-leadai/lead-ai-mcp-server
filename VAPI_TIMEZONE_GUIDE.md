@@ -1,25 +1,29 @@
-# VAPI Booking with Timezone Support
+# VAPI Booking with Timezone Support (Simplified)
 
 ## Overview
-The booking MCP now supports automatic timezone conversion. The system will:
-1. Accept booking times in the **customer's timezone**
-2. Automatically convert to the **business/agent's timezone**
-3. Book the appointment in the correct time
+The booking MCP now supports timezone-aware scheduling. **Microsoft Graph API handles all timezone conversions automatically** via the `Prefer: outlook.timezone` header.
+
+### Simple Flow:
+1. Customer provides datetime in their timezone OR UTC
+2. System passes it to Microsoft Graph with business timezone preference
+3. Graph API handles all timezone math automatically
+4. Appointment is created correctly
 
 ## How It Works
 
 ### Customer Flow
 1. Customer says: "Book me for 2pm tomorrow"
-2. AI asks: "What timezone are you in?" or "Are you in Eastern time?"
+2. AI asks: "What timezone are you in?" (optional for validation)
 3. Customer responds: "Eastern" or "EST" or "America/New_York"
-4. System converts customer's 2pm → business timezone → books appointment
+4. System passes datetime to Microsoft Graph API
+5. Graph API interprets time and creates event in correct timezone
 
-### Example Conversions
-```
-Customer (EST): 2:00 PM → Business (AEST): 5:00 AM next day
-Customer (PST): 10:00 AM → Business (AEST): 3:00 AM next day
-Customer (Local): 3:00 PM → Business (Same): 3:00 PM
-```
+### Microsoft Graph Timezone Handling
+- **`dateTime`**: ISO 8601 string (e.g., "2025-10-21T14:00:00")
+- **`timeZone`**: IANA timezone identifier (e.g., "America/New_York")
+- **`Prefer` header**: `outlook.timezone="Australia/Melbourne"` (business timezone)
+
+Graph API automatically handles DST, timezone offsets, and conversions.
 
 ## VAPI Prompt Addition
 
@@ -109,24 +113,25 @@ The system recognizes these timezone formats:
 ## Behavior
 
 ### If customerTimezone is provided:
-✅ Times are converted from customer timezone → business timezone
-✅ Validation happens in business timezone
-✅ Calendar event is created in business timezone
-✅ Logs show conversion details for debugging
+✅ Timezone is validated (ensures valid IANA timezone)
+✅ Datetime is passed as-is to Microsoft Graph API
+✅ Graph API uses business timezone from `Prefer` header
+✅ Graph handles all timezone conversion automatically
+✅ Logs show timezone information for debugging
 
 ### If customerTimezone is NOT provided:
-⚠️ Times are assumed to be in business timezone already
-✅ No conversion happens
-✅ Works as before (backward compatible)
+⚠️ Times are assumed to be in UTC or business timezone
+✅ Graph API still handles timezone via Prefer header
+✅ Backward compatible with existing integrations
 
 ## Example Logs
 
-When timezone conversion happens:
+When timezone is provided:
 ```
-🌍 Converting time from customer timezone (America/New_York) to business timezone (Australia/Melbourne)
-   Customer time: 2025-10-21T14:00:00 - 2025-10-21T15:00:00
-   Business time: 2025-10-22T05:00:00 - 2025-10-22T06:00:00
-   📅 Tue, Oct 22, 2025, 05:00 AM (customer) = Tue, Oct 22, 2025, 05:00 AM (business)
+🌍 Customer timezone: America/New_York, Business timezone: Australia/Melbourne
+   Customer provided time: 2025-10-21T14:00:00 - 2025-10-21T15:00:00
+   📌 Microsoft Graph will handle timezone conversion automatically via Prefer header
+🌍 Setting timezone header: Australia/Melbourne → AUS Eastern Standard Time
 ```
 
 ## Error Handling

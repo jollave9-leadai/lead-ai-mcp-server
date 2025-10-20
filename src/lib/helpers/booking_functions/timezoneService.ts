@@ -5,39 +5,25 @@
  */
 
 /**
- * Convert time from customer's timezone to business timezone
+ * DEPRECATED: No conversion needed - Microsoft Graph API handles timezone via Prefer header
+ * 
+ * The datetime should be provided in UTC or customer's timezone.
+ * Microsoft Graph API automatically handles timezone conversion using the
+ * `Prefer: outlook.timezone` header set in graphHelper.ts
+ * 
+ * This function is kept for backward compatibility only.
  */
 export function convertCustomerTimeToBusinessTime(
   dateTime: string,
   customerTimezone: string,
   businessTimezone: string
 ): string {
-  try {
-    // Parse the datetime in customer's timezone
-    const customerDate = new Date(dateTime);
-    
-    // Format in business timezone using built-in JS timezone handling
-    const businessTimeString = customerDate.toLocaleString('en-US', {
-      timeZone: businessTimezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-    
-    const [businessDatePart, businessTimePart] = businessTimeString.split(', ');
-    const [businessMonth, businessDay, businessYear] = businessDatePart.split('/');
-    const [businessHour, businessMinute, businessSecond] = businessTimePart.split(':');
-    
-    return `${businessYear}-${businessMonth.padStart(2, '0')}-${businessDay.padStart(2, '0')}T${businessHour}:${businessMinute}:${businessSecond}`;
-  } catch (error) {
-    console.error('Error converting timezone:', error);
-    // If conversion fails, return original datetime
-    return dateTime;
-  }
+  // No manual conversion needed - Graph API handles it automatically
+  // The Graph API request will include: Prefer: outlook.timezone="Australia/Melbourne"
+  // And Graph will interpret the datetime in the specified timezone
+  console.log(`ℹ️  Timezone conversion delegated to Microsoft Graph API`);
+  console.log(`   Customer TZ: ${customerTimezone} → Business TZ: ${businessTimezone}`);
+  return dateTime;
 }
 
 /**
