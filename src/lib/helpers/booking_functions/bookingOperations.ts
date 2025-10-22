@@ -397,6 +397,11 @@ export async function findAvailableTimeSlots(
       end: new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000),
     };
 
+    // Debug logging for VAPI availability issues
+    console.log(`🔍 Generating slots: ${searchRange.start.toISOString()} to ${searchRange.end.toISOString()}`);
+    console.log(`📋 Office hours:`, JSON.stringify(officeHours?.schedule));
+    console.log(`🌍 Timezone: ${timezone}`);
+
     const allSlots = officeHours?.schedule
       ? generateAvailableSlots(
           searchRange.start,
@@ -407,9 +412,13 @@ export async function findAvailableTimeSlots(
         )
       : [];
 
+    console.log(`📊 Generated ${allSlots.length} total slots`);
+
     const availableSlots = eventsResult.events
       ? filterAvailableSlots(allSlots, eventsResult.events)
       : allSlots;
+
+    console.log(`✅ ${availableSlots.length} slots after filtering conflicts`);
 
     const alternatives = findAlternativeSlots(
       startDate,
@@ -417,6 +426,8 @@ export async function findAvailableTimeSlots(
       availableSlots,
       request.maxSuggestions || 5
     );
+
+    console.log(`💡 Found ${alternatives.length} alternative slots`);
 
     return {
       success: true,

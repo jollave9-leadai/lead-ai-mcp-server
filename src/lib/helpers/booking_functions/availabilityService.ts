@@ -8,6 +8,7 @@
 import type { TimeSlot, AgentOfficeHours } from "@/types";
 import { createClient } from "@supabase/supabase-js";
 import type { GraphEvent } from "@/types/microsoft-graph";
+import { parseDateInTimezone } from "./parseDateInTimezone";
 
 /**
  * Generate available time slots within office hours
@@ -34,15 +35,17 @@ export function generateAvailableSlots(
     const daySchedule = officeHours[dayOfWeek];
 
     if (daySchedule && daySchedule.enabled) {
-      const [startHour, startMinute] = daySchedule.start.split(":").map(Number);
-      const [endHour, endMinute] = daySchedule.end.split(":").map(Number);
-
-      // Set to start of office hours
-      const dayStart = new Date(current);
-      dayStart.setHours(startHour, startMinute, 0, 0);
-
-      const dayEnd = new Date(current);
-      dayEnd.setHours(endHour, endMinute, 0, 0);
+      // FIXED: Create date string in ISO format, then parse in target timezone
+      // Get the date portion in the target timezone
+      const dateStr = current.toLocaleDateString("en-CA", { timeZone: timezone }); // YYYY-MM-DD format
+      
+      // Create start and end times in the target timezone
+      const dayStartStr = `${dateStr}T${daySchedule.start}:00`;
+      const dayEndStr = `${dateStr}T${daySchedule.end}:00`;
+      
+      // Parse these in the target timezone
+      const dayStart = parseDateInTimezone(dayStartStr, timezone);
+      const dayEnd = parseDateInTimezone(dayEndStr, timezone);
 
       // Generate slots for this day
       let slotStart = new Date(dayStart);
@@ -55,8 +58,11 @@ export function generateAvailableSlots(
           slotStart.getTime() + durationMinutes * 60 * 1000
         );
 
-        // Only include future slots
-        if (slotStart > new Date()) {
+        // Only include future slots (with 5 minute buffer)
+        const now = new Date();
+        const minTime = new Date(now.getTime() + 5 * 60 * 1000);
+        
+        if (slotStart > minTime) {
           slots.push({
             start: slotStart.toISOString(),
             end: slotEnd.toISOString(),
