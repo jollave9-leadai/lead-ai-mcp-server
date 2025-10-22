@@ -16,7 +16,6 @@ import type {
 import {
   searchContactByName,
   createManualContact,
-  isValidEmail,
 } from "./contactLookupService";
 import {
   generateAvailableSlots,
@@ -31,13 +30,11 @@ import {
   checkEventConflicts,
   validateBookingRequest,
   formatConflictDetails,
-  calculateBookingConfidence,
 } from "./conflictDetectionService";
 import { getCalendarConnectionByAgentId } from "./calendarConnectionService";
 import {
   normalizeTimezone,
   isValidTimezone,
-  formatDateTimeInTimezone,
 } from "./timezoneService";
 import { parseDateInTimezone } from "./parseDateInTimezone";
 import { FinalOptimizedCalendarOperations } from "../calendar_functions/finalOptimizedCalendarOperations";
@@ -49,7 +46,8 @@ export async function createBooking(
   request: BookingRequest
 ): Promise<BookingResponse> {
   try {
-    console.log("📅 Creating booking:", request);
+    // Reduced logging for VAPI performance
+    console.log(`📅 Creating booking for ${request.contactName} at ${request.startDateTime}`);
 
     // Step 1: Get calendar connection for this agent
     const connection = await getCalendarConnectionByAgentId(
@@ -64,8 +62,6 @@ export async function createBooking(
       };
     }
 
-    console.log(`✅ Using calendar connection: ${connection.id} for agent ${request.agentId}`);
-
     // Step 2: Get agent office hours directly by agent ID
     const officeHours = await getAgentOfficeHoursByAgentId(
       request.agentId,
@@ -75,38 +71,21 @@ export async function createBooking(
     const businessTimezone = officeHours?.timezone || "Australia/Melbourne";
 
     // Step 3: Timezone handling
-    // Important: Customer's datetime is interpreted as CLIENT'S timezone (not UTC!)
-    // Example: Customer says "2pm" → We treat as 2pm Melbourne time (NOT 2pm UTC)
     let customerTimezone: string | undefined;
 
     if (request.customerTimezone) {
       customerTimezone = normalizeTimezone(request.customerTimezone);
       
       if (!isValidTimezone(customerTimezone)) {
-        console.log(`⚠️ Invalid customer timezone: ${request.customerTimezone}`);
         return {
           success: false,
-          error: `Invalid timezone: "${request.customerTimezone}". Please provide a valid timezone like "America/New_York", "EST", or "Eastern".`,
+          error: `Invalid timezone: "${request.customerTimezone}". Please provide a valid timezone.`,
         };
       }
-
-      console.log(`🌍 Customer timezone specified: ${customerTimezone}`);
-      console.log(`   ⚠️  Note: For now, datetime will be interpreted as client timezone: ${businessTimezone}`);
-      console.log(`   📌 Future enhancement: Could interpret as customer's timezone`);
-    } else {
-      console.log(`🌍 No customer timezone specified - using client timezone: ${businessTimezone}`);
     }
 
-    // Use datetime as-is - it will be interpreted in CLIENT'S timezone by Graph API
-    // Example: "14:00:00" + timeZone:"Australia/Melbourne" = 2pm Melbourne (3am UTC)
     const startDateTime = request.startDateTime;
     const endDateTime = request.endDateTime;
-    
-    console.log(`📅 Booking time: ${startDateTime} (interpreted as ${businessTimezone})`);
-    
-    // Parse the datetime IN the business timezone for display
-    const startDateInTZ = parseDateInTimezone(startDateTime, businessTimezone);
-    console.log(`   This means: ${formatDateTimeInTimezone(startDateInTZ.toISOString(), businessTimezone)}`);
 
     // Step 4: Resolve contact information
     let contactEmail = request.contactEmail;
@@ -115,7 +94,6 @@ export async function createBooking(
 
     // Always try to find contact in database if name is provided
     if (request.contactName) {
-      console.log(`🔍 Searching for contact: ${request.contactName}`);
       const contactSearch = await searchContactByName(
         request.contactName,
         request.clientId
@@ -123,22 +101,15 @@ export async function createBooking(
 
       if (contactSearch.found && contactSearch.contact) {
         // Found exact match - use database info
-        contactEmail = contactSearch.contact.email || contactEmail; // Use DB email if available
+        contactEmail = contactSearch.contact.email || contactEmail;
         contactName = contactSearch.contact.name;
         contactFound = true;
-        console.log(`✅ Found contact in database: ${contactName}${contactEmail ? ` (${contactEmail})` : ' (no email)'}`);
       } else if (contactSearch.matches && contactSearch.matches.length > 0) {
         // Multiple matches - ask for clarification
         return {
           success: false,
-          error: `Multiple contacts found for "${request.contactName}". Please specify email address. Found: ${contactSearch.matches.map((m) => `${m.name} (${m.email})`).join(", ")}`,
+          error: `Multiple contacts found for "${request.contactName}". Please specify email address.`,
         };
-      } else {
-        // Not found in database - use provided info or proceed without email
-        console.log(`ℹ️ Contact not found in database. Proceeding with provided information.`);
-        if (!contactEmail) {
-          console.log(`⚠️ No email address available for this booking`);
-        }
       }
     }
 
@@ -166,11 +137,6 @@ export async function createBooking(
         success: false,
         error: `Validation failed: ${validation.errors.join(", ")}`,
       };
-    }
-
-    // Log warnings if any
-    if (validation.warnings.length > 0) {
-      console.log(`⚠️ Warnings: ${validation.warnings.join(", ")}`);
     }
 
     // Step 6: Check for conflicts
@@ -205,7 +171,6 @@ export async function createBooking(
       );
 
       if (conflictCheck.hasConflict) {
-        console.log("⚠️ Conflict detected, finding alternatives...");
 
         // Find alternative slots
         const searchRange = {
@@ -248,7 +213,6 @@ export async function createBooking(
     }
 
     // Step 7: Create the calendar event (use agent's calendar with converted times)
-    console.log("✅ No conflicts, creating event...");
 
     const createResult =
       await FinalOptimizedCalendarOperations.createCalendarEventForClient(
@@ -274,19 +238,6 @@ export async function createBooking(
         error: createResult.error || "Failed to create booking",
       };
     }
-
-    // Calculate confidence score
-    const confidence = calculateBookingConfidence({
-      hasContactInDatabase: contactFound,
-      isWithinOfficeHours: true,
-      hasNoConflicts: true,
-      isReasonableDuration: true,
-      hasValidEmail: contactEmail ? isValidEmail(contactEmail) : false,
-    });
-
-    console.log(
-      `✅ Booking created successfully (confidence: ${confidence.level})`
-    );
 
     return {
       success: true,
@@ -319,7 +270,6 @@ export async function findAvailableTimeSlots(
   request: AvailabilityCheckRequest
 ): Promise<AvailabilityCheckResponse> {
   try {
-    console.log("🔍 Finding available slots:", request);
 
     // Get calendar connection for this agent
     const connection = await getCalendarConnectionByAgentId(
@@ -415,23 +365,11 @@ export async function findAvailableTimeSlots(
         connection.id // Pass the agent's calendar connection ID
       );
 
-    // Debug logging
-    console.log(`📊 Events retrieved: ${eventsResult.events?.length || 0}`);
-    if (eventsResult.events && eventsResult.events.length > 0) {
-      console.log('📅 Existing events:');
-      eventsResult.events.forEach(event => {
-        console.log(`   - ${event.subject}: ${event.start.dateTime} to ${event.end.dateTime} (TZ: ${event.start.timeZone})`);
-      });
-    }
-    console.log(`🔍 Checking conflict for: ${startDate.toISOString()} to ${endDate.toISOString()}`);
-
     const hasConflict =
       eventsResult.success && eventsResult.events
         ? checkEventConflicts(startDate, endDate, eventsResult.events)
             .hasConflict
         : false;
-
-    console.log(`⚠️  Has conflict: ${hasConflict}`);
 
     // If no conflict, requested slot is available
     if (!hasConflict) {

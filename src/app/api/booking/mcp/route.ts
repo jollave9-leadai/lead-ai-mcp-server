@@ -115,7 +115,12 @@ const handler = createMcpHandler(
             };
           }
 
-          const result = await findAvailableTimeSlots({
+          // Check availability with timeout guard (VAPI has ~10s timeout)
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Availability check timed out. Please try again.")), 8000)
+          );
+
+          const availabilityPromise = findAvailableTimeSlots({
             clientId: numericClientId,
             agentId: numericAgentId,
             startDateTime: normalizedStart.normalizedDateTime!,
@@ -123,6 +128,8 @@ const handler = createMcpHandler(
             durationMinutes: input.durationMinutes,
             maxSuggestions: input.maxSuggestions,
           });
+
+          const result = await Promise.race([availabilityPromise, timeoutPromise]);
 
           if (!result.success) {
             return {
@@ -135,31 +142,21 @@ const handler = createMcpHandler(
             };
           }
 
-          let responseText = "📅 **AVAILABILITY CHECK RESULTS**\n\n";
-          responseText += `**Requested Time**: ${result.requestedSlot.startFormatted} - ${result.requestedSlot.endFormatted}\n\n`;
+          // Build concise response for VAPI
+          let responseText = "";
 
           if (result.isAvailable) {
-            responseText += "✅ **AVAILABLE!**\n\n";
-            responseText += "The requested time slot is free and can be booked immediately.\n";
-            responseText += "You can proceed with creating the calendar event using CreateCalendarEvent tool.";
+            responseText = `✅ ${result.requestedSlot.startFormatted} is available. Ready to book!`;
           } else {
-            responseText += "❌ **NOT AVAILABLE**\n\n";
-
-            if (result.conflictDetails) {
-              responseText += `**Reason**: ${result.conflictDetails}\n\n`;
-            }
+            responseText = `❌ ${result.requestedSlot.startFormatted} is not available.`;
 
             if (result.availableSlots && result.availableSlots.length > 0) {
-              responseText += `**💡 SUGGESTED ALTERNATIVE TIMES** (within business hours):\n\n`;
-
+              responseText += ` Alternative times:\n`;
               result.availableSlots.forEach((slot, index) => {
-                responseText += `${index + 1}. ${slot.startFormatted} - ${slot.endFormatted}\n`;
+                responseText += `${index + 1}. ${slot.startFormatted}\n`;
               });
-
-              responseText += `\n**Next Step**: Choose one of these times and use CreateCalendarEvent to book it.`;
             } else {
-              responseText += "⚠️ **No alternative slots found** within the next 7 days during business hours.\n";
-              responseText += "Please try a different date or contact support.";
+              responseText += ` No alternatives found in the next 7 days. Try a different date.`;
             }
           }
 
@@ -418,12 +415,12 @@ const handler = createMcpHandler(
             };
           }
 
-          console.log(`✅ Normalized dates:`);
-          console.log(`   Start: ${normalizedStart.originalInput} → ${normalizedStart.normalizedDateTime}`);
-          console.log(`   End: ${normalizedEnd.originalInput} → ${normalizedEnd.normalizedDateTime}`);
+          // Create booking with timeout guard (VAPI has ~10s timeout)
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Booking operation timed out. The system is busy, please try again.")), 8000)
+          );
 
-          // Create booking
-          const result = await createBooking({
+          const bookingPromise = createBooking({
             clientId: numericClientId,
             agentId: numericAgentId,
             subject: input.subject,
@@ -437,6 +434,8 @@ const handler = createMcpHandler(
             isOnlineMeeting: input.isOnlineMeeting,
           });
 
+          const result = await Promise.race([bookingPromise, timeoutPromise]);
+
           if (!result.success) {
             return {
               content: [
@@ -448,31 +447,25 @@ const handler = createMcpHandler(
             };
           }
 
-          // Success response
+          // Success response (lightweight for VAPI)
           const booking = result.booking!;
-          let responseText = "✅ **APPOINTMENT BOOKED SUCCESSFULLY!**\n\n";
-          responseText += `📋 **${booking.subject}**\n`;
-          responseText += `📅 **Date/Time**: ${new Date(booking.startDateTime).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} - ${new Date(booking.endDateTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}\n`;
-          responseText += `👤 **Contact**: ${booking.contact.name}\n`;
+          const startTime = new Date(booking.startDateTime).toLocaleString("en-US", { 
+            weekday: "short", 
+            month: "short", 
+            day: "numeric", 
+            hour: "2-digit", 
+            minute: "2-digit" 
+          });
+          
+          // Build concise response
+          let responseText = `✅ Appointment confirmed for ${startTime} with ${booking.contact.name}.`;
           
           if (booking.contact.email) {
-            responseText += `📧 **Email**: ${booking.contact.email}\n`;
-          } else {
-            responseText += `⚠️ **No email provided** - Invitation not sent\n`;
+            responseText += ` Confirmation sent to ${booking.contact.email}.`;
           }
-
-          if (booking.location) {
-            responseText += `📍 **Location**: ${booking.location}\n`;
-          }
-
+          
           if (booking.teamsLink) {
-            responseText += `💻 **Teams Meeting**: ${booking.teamsLink}\n`;
-          }
-
-          responseText += `\n🆔 **Event ID**: ${booking.eventId}\n`;
-          
-          if (booking.contact.email) {
-            responseText += `\n✉️ **Invitation sent** to ${booking.contact.email}`;
+            responseText += ` Teams link: ${booking.teamsLink}`;
           }
 
           return {
