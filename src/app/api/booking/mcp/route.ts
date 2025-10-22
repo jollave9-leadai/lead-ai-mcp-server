@@ -115,10 +115,6 @@ const handler = createMcpHandler(
             };
           }
 
-          console.log(`✅ Normalized dates:`);
-          console.log(`   Start: ${normalizedStart.originalInput} → ${normalizedStart.normalizedDateTime}`);
-          console.log(`   End: ${normalizedEnd.originalInput} → ${normalizedEnd.normalizedDateTime}`);
-
           const result = await findAvailableTimeSlots({
             clientId: numericClientId,
             agentId: numericAgentId,
