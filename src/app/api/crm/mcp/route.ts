@@ -247,9 +247,10 @@ const handler = createMcpHandler(
       {
         name: z.string(),
         clientId: z.string(), // Injected from the prompt
-        message: z.string(),
+        emailSubject: z.string(),
+        emailBody: z.string(),
       },
-      async ({ name, clientId, message }) => {
+      async ({ name, clientId, emailSubject, emailBody }) => {
         const [customer] = await getCustomerWithFuzzySearch(name, clientId);
         console.log("customer", customer);
         console.log("clientId", clientId);
@@ -276,7 +277,8 @@ const handler = createMcpHandler(
         const response = await sendEmail(
           clientId,
           customer.item.email,
-          message,
+          emailSubject,
+          emailBody,
           customer.item.pipeline_stage_id
         );
         console.log("response", response);

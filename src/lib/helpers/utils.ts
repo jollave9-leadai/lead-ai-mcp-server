@@ -174,14 +174,12 @@ export const initiateCall = async (
   });
 };
 
-
 export const getCustomerPipeLineWithFuzzySearch = async (fullName: string) => {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
-  
-  
+
   const { data: customerPipeLines } = await supabase
     .from("customer_pipeline_items_with_customers")
     .select("id, full_name, created_by, pipeline_stage_id");
@@ -419,6 +417,7 @@ const handleRefreshToken = async (refreshToken: string, provider: string) => {
 export async function sendOutlookMail(
   accessToken: string,
   email: string,
+  emailSubject: string,
   emailBody: string
 ) {
   const client = Client.init({
@@ -429,7 +428,7 @@ export async function sendOutlookMail(
 
   await client.api("/me/sendMail").post({
     message: {
-      subject: "From LeadAI!",
+      subject: emailSubject,
       body: {
         contentType: "Text",
         content: emailBody,
@@ -450,6 +449,7 @@ const sendGmail = async (
   accessToken: string,
   toEmail: string,
   fromEmail: string,
+  emailSubject: string,
   emailBody: string
 ) => {
   const auth = new google.auth.OAuth2();
@@ -460,7 +460,7 @@ const sendGmail = async (
   const rawMessage = createEmailRaw(
     toEmail,
     fromEmail,
-    "From LeadAI!",
+    emailSubject,
     emailBody
   );
 
@@ -474,6 +474,7 @@ const sendGmail = async (
 export const sendEmail = async (
   client_id: string,
   email: string,
+  emailSubject: string,
   emailBody: string,
   stage_id: string
 ) => {
@@ -527,8 +528,14 @@ export const sendEmail = async (
         refreshToken = refreshedToken.refresh_token;
       }
     }
+    // let { subject, body } = JSON.parse(emailMessage);
     if (emailData?.provider === "azure-ad") {
-      const response = await sendOutlookMail(accessToken, email, emailBody);
+      const response = await sendOutlookMail(
+        accessToken,
+        email,
+        emailSubject,
+        emailBody
+      );
       console.log("Outlook Email response:", response);
       return response;
     } else {
@@ -536,6 +543,7 @@ export const sendEmail = async (
         accessToken,
         email,
         emailData?.email || "",
+        emailSubject,
         emailBody
       );
       console.log("Email response:", response.data);
@@ -547,11 +555,13 @@ export const sendEmail = async (
   }
 };
 
-
 /**
  * Get agent assigned to a calendar connection
  */
-export const getAgentByCalendarConnection = async (calendarConnectionId: string, clientId: number) => {
+export const getAgentByCalendarConnection = async (
+  calendarConnectionId: string,
+  clientId: number
+) => {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -560,7 +570,8 @@ export const getAgentByCalendarConnection = async (calendarConnectionId: string,
   const { data: assignment, error } = await supabase
     .schema("lead_dialer")
     .from("agent_calendar_assignments")
-    .select(`
+    .select(
+      `
       agent_id,
       agents!inner (
         id,
@@ -575,7 +586,8 @@ export const getAgentByCalendarConnection = async (calendarConnectionId: string,
           timezone
         )
       )
-    `)
+    `
+    )
     .eq("calendar_connection_id", calendarConnectionId)
     .eq("client_id", clientId)
     .single();
@@ -594,7 +606,7 @@ export const getAgentByCalendarConnection = async (calendarConnectionId: string,
 export const isWithinOfficeHours = (
   dateTime: string,
   officeHours: Record<string, { start: string; end: string; enabled: boolean }>,
-  timezone: string = 'Australia/Melbourne'
+  timezone: string = "Australia/Melbourne"
 ): { isWithin: boolean; reason?: string } => {
   if (!officeHours) {
     return { isWithin: true }; // No office hours restriction
@@ -602,26 +614,28 @@ export const isWithinOfficeHours = (
 
   try {
     const date = new Date(dateTime);
-    const dayOfWeek = date.toLocaleDateString('en-US', { 
-      weekday: 'long',
-      timeZone: timezone 
-    }).toLowerCase();
-    
-    const timeString = date.toLocaleTimeString('en-US', {
+    const dayOfWeek = date
+      .toLocaleDateString("en-US", {
+        weekday: "long",
+        timeZone: timezone,
+      })
+      .toLowerCase();
+
+    const timeString = date.toLocaleTimeString("en-US", {
       hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: timezone
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: timezone,
     });
 
     // Convert office hours format - assuming it's like:
     // { "monday": { "start": "09:00", "end": "17:00", "enabled": true }, ... }
     const daySchedule = officeHours[dayOfWeek];
-    
+
     if (!daySchedule || !daySchedule.enabled) {
-      return { 
-        isWithin: false, 
-        reason: `Agent is not available on ${dayOfWeek}s` 
+      return {
+        isWithin: false,
+        reason: `Agent is not available on ${dayOfWeek}s`,
       };
     }
 
@@ -629,9 +643,9 @@ export const isWithinOfficeHours = (
     const endTime = daySchedule.end;
 
     if (timeString < startTime || timeString > endTime) {
-      return { 
-        isWithin: false, 
-        reason: `Time ${timeString} is outside office hours (${startTime} - ${endTime}) on ${dayOfWeek}s` 
+      return {
+        isWithin: false,
+        reason: `Time ${timeString} is outside office hours (${startTime} - ${endTime}) on ${dayOfWeek}s`,
       };
     }
 
@@ -648,7 +662,7 @@ export const isWithinOfficeHours = (
 export const getOfficeHoursSlots = (
   date: string,
   officeHours: Record<string, { start: string; end: string; enabled: boolean }>,
-  timezone: string = 'Australia/Melbourne',
+  timezone: string = "Australia/Melbourne",
   slotDurationMinutes: number = 60
 ): Array<{ start: string; end: string }> => {
   if (!officeHours) {
@@ -657,24 +671,26 @@ export const getOfficeHoursSlots = (
 
   try {
     const targetDate = new Date(date);
-    const dayOfWeek = targetDate.toLocaleDateString('en-US', { 
-      weekday: 'long',
-      timeZone: timezone 
-    }).toLowerCase();
+    const dayOfWeek = targetDate
+      .toLocaleDateString("en-US", {
+        weekday: "long",
+        timeZone: timezone,
+      })
+      .toLowerCase();
 
     const daySchedule = officeHours[dayOfWeek];
-    
+
     if (!daySchedule || !daySchedule.enabled) {
       return []; // Not available on this day
     }
 
     const slots: Array<{ start: string; end: string }> = [];
     const startTime = daySchedule.start; // e.g., "09:00"
-    const endTime = daySchedule.end;     // e.g., "17:00"
+    const endTime = daySchedule.end; // e.g., "17:00"
 
     // Parse start and end times
-    const [startHour, startMinute] = startTime.split(':').map(Number);
-    const [endHour, endMinute] = endTime.split(':').map(Number);
+    const [startHour, startMinute] = startTime.split(":").map(Number);
+    const [endHour, endMinute] = endTime.split(":").map(Number);
 
     // Create datetime objects for the target date
     const startDateTime = new Date(targetDate);
@@ -685,17 +701,22 @@ export const getOfficeHoursSlots = (
 
     // Generate slots every 30 minutes within office hours
     let currentSlot = new Date(startDateTime);
-    
-    while (currentSlot.getTime() + (slotDurationMinutes * 60 * 1000) <= endDateTime.getTime()) {
-      const slotEnd = new Date(currentSlot.getTime() + (slotDurationMinutes * 60 * 1000));
-      
+
+    while (
+      currentSlot.getTime() + slotDurationMinutes * 60 * 1000 <=
+      endDateTime.getTime()
+    ) {
+      const slotEnd = new Date(
+        currentSlot.getTime() + slotDurationMinutes * 60 * 1000
+      );
+
       slots.push({
         start: currentSlot.toISOString(),
-        end: slotEnd.toISOString()
+        end: slotEnd.toISOString(),
       });
 
       // Move to next slot (30-minute increments)
-      currentSlot = new Date(currentSlot.getTime() + (30 * 60 * 1000));
+      currentSlot = new Date(currentSlot.getTime() + 30 * 60 * 1000);
     }
 
     return slots;
