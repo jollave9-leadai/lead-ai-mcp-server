@@ -593,7 +593,10 @@ export const getAgentByCalendarConnection = async (
     .single();
 
   if (error) {
-    console.error("Error getting agent by calendar connection:", error);
+    // PGRST116 = no rows found, which is expected when agent is not assigned to this calendar
+    if (error.code !== 'PGRST116') {
+      console.error("Error getting agent by calendar connection:", error);
+    }
     return null;
   }
 

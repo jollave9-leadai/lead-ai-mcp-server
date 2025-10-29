@@ -330,6 +330,30 @@ export class AdvancedCacheService {
   }
 
   /**
+   * Get specific calendar connection by ID
+   */
+  static async getCalendarConnectionById(connectionId: string): Promise<GraphCalendarConnection | null> {
+    const cacheKey = `connection-by-id:${connectionId}`
+    
+    let connection = await advancedCache.get<GraphCalendarConnection>(cacheKey)
+    if (connection) {
+      console.log(`🚀 Cache HIT: Calendar connection ${connectionId}`)
+      return connection
+    }
+
+    console.log(`💾 Cache MISS: Fetching calendar connection ${connectionId}`)
+    
+    const { getCalendarConnectionById } = await import('../calendar_functions/graphDatabase')
+    connection = await getCalendarConnectionById(connectionId)
+    
+    if (connection) {
+      await advancedCache.set(cacheKey, connection, this.TTL.CALENDAR_CONNECTION)
+    }
+    
+    return connection
+  }
+
+  /**
    * Get cached client timezone or fetch from database
    */
   static async getClientTimezone(clientId: number): Promise<string | null> {
@@ -356,8 +380,13 @@ export class AdvancedCacheService {
   /**
    * Get comprehensive client calendar data in a single cached operation
    */
-  static async getClientCalendarData(clientId: number): Promise<ClientCalendarData | null> {
-    const cacheKey = `client-data:${clientId}`
+  static async getClientCalendarData(
+    clientId: number,
+    calendarConnectionId?: string
+  ): Promise<ClientCalendarData | null> {
+    const cacheKey = calendarConnectionId 
+      ? `client-data:${clientId}:${calendarConnectionId}`
+      : `client-data:${clientId}`
     
     let clientData = await advancedCache.get<ClientCalendarData>(cacheKey)
     if (clientData) {
@@ -369,10 +398,11 @@ export class AdvancedCacheService {
     
     try {
       // Fetch all data in parallel
-      const [connection, timezone] = await Promise.all([
-        this.getCalendarConnection(clientId),
-        this.getClientTimezone(clientId)
-      ])
+      const connection = calendarConnectionId
+        ? await this.getCalendarConnectionById(calendarConnectionId)
+        : await this.getCalendarConnection(clientId)
+        
+      const timezone = await this.getClientTimezone(clientId)
 
       if (!connection || !timezone) {
         return null

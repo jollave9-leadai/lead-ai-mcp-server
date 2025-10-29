@@ -565,6 +565,44 @@ export async function createCalendarEventForClient(
     }
 
     // Prepare event data
+    const attendees: {
+      type?: 'required' | 'optional'
+      emailAddress: {
+        name?: string
+        address: string
+      }
+      status?: {
+        response: 'none' | 'organizer' | 'tentativelyAccepted' | 'accepted' | 'declined' | 'notResponded'
+        time: string
+      }
+    }[] = [
+      {
+        type: 'required',
+        emailAddress: {
+          name: connection.display_name || connection.email,
+          address: connection.email,
+        },
+        status: {
+          response: 'organizer',
+          time: new Date().toISOString()
+        }
+      }
+    ]
+
+    if (request.attendeeEmail) {
+      attendees.push({
+        type: 'required',
+        emailAddress: {
+          name: request.attendeeName || 'Guest',
+          address: request.attendeeEmail,
+        },
+        status: {
+          response: 'none',
+          time: new Date().toISOString()
+        }
+      })
+    }
+
     const eventData: CreateGraphEventRequest = {
       subject: request.subject,
       start: {
@@ -581,38 +619,15 @@ export async function createCalendarEventForClient(
           address: connection.email
         }
       },
-      attendees: [
-        // Add organizer as attendee to receive notifications
-        {
-          type: 'required',
-          emailAddress: {
-            name: connection.display_name || connection.email,
-            address: connection.email,
-          },
-          status: {
-            response: 'organizer',
-            time: new Date().toISOString()
-          }
-        },
-        // Add the actual attendee
-        {
-          type: 'required',
-          emailAddress: {
-            name: request.attendeeName,
-            address: request.attendeeEmail,
-          },
-          status: {
-            response: 'none',
-            time: new Date().toISOString()
-          }
-        }
-      ],
-      responseRequested: true,
+      attendees,
+      responseRequested: request.attendeeEmail ? true : false,
     }
 
     console.log(`📧 Microsoft Graph will automatically send notifications to:`)
     console.log(`📧 - Organizer: ${connection.email} (${connection.display_name || 'No name'})`)
-    console.log(`📧 - Attendee: ${request.attendeeEmail} (${request.attendeeName || 'No name'})`)
+    if (request.attendeeEmail) {
+      console.log(`📧 - Attendee: ${request.attendeeEmail} (${request.attendeeName || 'No name'})`)
+    }
 
     // Check for conflicts and find available slots if needed
     console.log(`🔍 Checking for conflicts for new event: ${request.startDateTime} to ${request.endDateTime}`)

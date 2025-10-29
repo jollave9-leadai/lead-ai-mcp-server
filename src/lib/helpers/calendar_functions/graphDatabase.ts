@@ -39,6 +39,38 @@ export async function getCalendarConnectionByClientId(clientId: number): Promise
 }
 
 /**
+ * Get calendar connection by ID
+ */
+export async function getCalendarConnectionById(connectionId: string): Promise<GraphCalendarConnection | null> {
+  try {
+    console.log(`Getting calendar connection by ID: ${connectionId}`)
+    
+    const supabase = createClient()
+    
+    const { data, error } = await supabase
+      .schema('lead_dialer')
+      .from('calendar_connections')
+      .select('*')
+      .eq('id', connectionId)
+      .eq('is_connected', true)
+      .single()
+    
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // No rows returned
+        return null
+      }
+      throw error
+    }
+    
+    return data as GraphCalendarConnection
+  } catch (error) {
+    console.error('Error getting calendar connection by ID:', error)
+    return null
+  }
+}
+
+/**
  * Get all calendar connections for a client
  */
 export async function getCalendarConnectionsByClientId(clientId: number): Promise<GraphCalendarConnection[]> {

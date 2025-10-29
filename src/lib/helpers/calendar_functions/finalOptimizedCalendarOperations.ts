@@ -21,7 +21,8 @@ export class FinalOptimizedCalendarOperations {
    */
   static async getCalendarEventsForClient(
     clientId: number,
-    request: GetGraphEventsRequest
+    request: GetGraphEventsRequest,
+    calendarConnectionId?: string
   ): Promise<{
     success: boolean
     events?: GraphEvent[]
@@ -29,8 +30,8 @@ export class FinalOptimizedCalendarOperations {
     error?: string
   }> {
     try {
-      // Get all client data with advanced caching
-      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
+      // Get all client data with advanced caching (use specific calendar connection if provided)
+      const clientData = await AdvancedCacheService.getClientCalendarData(clientId, calendarConnectionId)
       if (!clientData) {
         return {
           success: false,
@@ -100,7 +101,8 @@ export class FinalOptimizedCalendarOperations {
    */
   static async createCalendarEventForClient(
     clientId: number,
-    request: CreateGraphEventMCPRequest
+    request: CreateGraphEventMCPRequest,
+    calendarConnectionId?: string
   ): Promise<{
     success: boolean
     event?: GraphEvent
@@ -115,8 +117,8 @@ export class FinalOptimizedCalendarOperations {
     }>
   }> {
     try {
-      // Get all client data with advanced caching
-      const clientData = await AdvancedCacheService.getClientCalendarData(clientId)
+      // Get all client data with advanced caching (use specific calendar connection if provided)
+      const clientData = await AdvancedCacheService.getClientCalendarData(clientId, calendarConnectionId)
       if (!clientData) {
         return {
           success: false,
@@ -173,6 +175,46 @@ export class FinalOptimizedCalendarOperations {
       }
 
       // Prepare event data
+      const attendees: {
+        type?: 'required' | 'optional'
+        emailAddress: {
+          name?: string
+          address: string
+        }
+        status?: {
+          response: 'none' | 'organizer' | 'tentativelyAccepted' | 'accepted' | 'declined' | 'notResponded'
+          time: string
+        }
+      }[] = [
+        // Add organizer as attendee to receive notifications
+        {
+          type: 'required',
+          emailAddress: {
+            name: connection.display_name || connection.email,
+            address: connection.email,
+          },
+          status: {
+            response: 'organizer',
+            time: new Date().toISOString()
+          }
+        }
+      ]
+
+      // Add the actual attendee only if email is provided
+      if (request.attendeeEmail) {
+        attendees.push({
+          type: 'required',
+          emailAddress: {
+            name: request.attendeeName || 'Guest',
+            address: request.attendeeEmail,
+          },
+          status: {
+            response: 'none',
+            time: new Date().toISOString()
+          }
+        })
+      }
+
       const eventData: CreateGraphEventRequest = {
         subject: request.subject,
         start: {
@@ -189,33 +231,8 @@ export class FinalOptimizedCalendarOperations {
             address: connection.email
           }
         },
-        attendees: [
-          // Add organizer as attendee to receive notifications
-          {
-            type: 'required',
-            emailAddress: {
-              name: connection.display_name || connection.email,
-              address: connection.email,
-            },
-            status: {
-              response: 'organizer',
-              time: new Date().toISOString()
-            }
-          },
-          // Add the actual attendee
-          {
-            type: 'required',
-            emailAddress: {
-              name: request.attendeeName,
-              address: request.attendeeEmail,
-            },
-            status: {
-              response: 'none',
-              time: new Date().toISOString()
-            }
-          }
-        ],
-        responseRequested: true,
+        attendees,
+        responseRequested: request.attendeeEmail ? true : false, // Only request response if attendee has email
       }
 
       // Add optional fields
