@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import Fuse from "fuse.js";
 import axios from "axios";
-import { BASE_SUPABASE_FUNCTIONS_URL } from "./constants";
+import { BASE_NESTJS_API_URL } from "./constants";
 import { google } from "googleapis";
 import { Client } from "@microsoft/microsoft-graph-client";
 
@@ -191,48 +191,83 @@ export const getCustomerPipeLineWithFuzzySearch = async (fullName: string) => {
   return fuse.search(fullName);
 };
 
-export const getNextPipeLineStage = async (
-  pipelineStageId: string,
-  clientId: string
+export const getStageItemByWithFuzzySearch = async (
+  name: string,
+  clientId?: string
 ) => {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-  const { data: pipeline } = await supabase
-    .from("pipelines")
-    .select("id, pipeline_stages(id, sort_order, name)")
-    .order("sort_order", {
-      referencedTable: "pipeline_stages",
-      ascending: true,
-    })
-    .eq("is_default", true)
-    .eq("created_by", clientId)
-    .single();
-  const currentIndex = pipeline?.pipeline_stages.findIndex(
+  console.log("clientId", clientId); // add to query once the endpoint already supports it
+
+  // TODO: add endpoint to get all items to avoid double query
+  // initial query to get total count of stage items
+  const {
+    data: { data: partialStageItems },
+  } = await axios.get(`${BASE_NESTJS_API_URL}/stage-items`);
+
+  // second query to get all items
+  const {
+    data: { data: stageItems },
+  } = await axios.get<{
+    data: Array<{
+      id: string;
+      pipelineStageId: string;
+      pipelineStage: { pipeline: { id: string } };
+      party: { contact: { name: string; phoneNumber: string; email: string } };
+    }>;
+  }>(`${BASE_NESTJS_API_URL}/stage-items`, {
+    params: {
+      page: 1,
+      limit: partialStageItems.total,
+    },
+  });
+
+  console.log("stageItems", stageItems);
+  const withContacts = stageItems.filter((item) => item.party.contact);
+
+  const fuse = new Fuse(withContacts || [], {
+    keys: ["party.contact.name"], // fields to search - nested path using dot notation
+    threshold: 0.3, // how fuzzy (0 = exact, 1 = very fuzzy)
+  });
+  console.log("fuse", fuse.search(name));
+  return fuse.search(name);
+};
+
+export const getNextPipeLineStage = async (
+  pipelineId: string,
+  pipelineStageId: string
+) => {
+  console.log("pipelineId", pipelineId);
+  console.log("pipelineStageId", pipelineStageId);
+  const { data: pipelineStages } = await axios.get<
+    Array<{ id: string; sort_order: number; name: string }>
+  >(`${BASE_NESTJS_API_URL}/pipeline-stages/pipeline/${pipelineId}`);
+  const currentIndex = pipelineStages.findIndex(
     (stage) => stage.id === pipelineStageId
   );
   // check if currentIndex is undefined since 0 is also falsy
   if (
     currentIndex === undefined ||
     currentIndex === -1 ||
-    !pipeline?.pipeline_stages[currentIndex + 1]
+    !pipelineStages[currentIndex + 1]
   ) {
     return null;
   }
-  return pipeline?.pipeline_stages[currentIndex + 1];
+  console.log(
+    "pipelineStages[currentIndex + 1]",
+    pipelineStages[currentIndex + 1]
+  );
+  return pipelineStages[currentIndex + 1];
 };
 
 export const moveLeadToNextStage = async (
-  customerPipelineId: string,
+  stageItemId: string,
   pipelineStageId: string
 ) => {
-  console.log("customerPipelineId", customerPipelineId);
+  console.log("stageItemId", stageItemId);
   console.log("pipelineStageId", pipelineStageId);
-  await axios.put(
-    `${BASE_SUPABASE_FUNCTIONS_URL}/customer-pipeline-items/${customerPipelineId}/stage`,
+  await axios.patch(
+    `${BASE_NESTJS_API_URL}/stage-items/${stageItemId}/move-to-stage`,
     {
-      pipeline_stage_id: pipelineStageId,
+      pipelineStageId,
     }
   );
 };
@@ -281,32 +316,42 @@ export const getSuccessCriteriaByPhoneNumber = async (
   phoneNumber: string,
   clientId: string
 ) => {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  console.log("clientId", clientId);
+  // TODO: add endpoint to get all items to avoid double query
+  // initial query to get total count of stage items
+  const {
+    data: { data: partialStageItems },
+  } = await axios.get(`${BASE_NESTJS_API_URL}/stage-items`);
+
+  // second query to get all items
+  const {
+    data: { data: stageItems },
+  } = await axios.get<{
+    data: Array<{
+      id: string;
+      pipelineStageId: string;
+      pipelineStage: { pipeline: { id: string } };
+      party: { contact: { name: string; phoneNumber: string; email: string } };
+    }>;
+  }>(`${BASE_NESTJS_API_URL}/stage-items`, {
+    params: {
+      page: 1,
+      limit: partialStageItems.total,
+    },
+  });
+
+  const stageItem = stageItems.find(
+    (item) =>
+      item.party.contact && item.party.contact.phoneNumber === phoneNumber
   );
 
-  // TODO: replace created_by with client_id
-  const { data: customer } = await supabase
-    .from("customer_pipeline_items_with_customers")
-    .select("full_name, pipeline_stage_id")
-    .eq("phone_number", phoneNumber)
-    .eq("created_by", clientId)
-    .single();
-
-  console.log("clientId", clientId);
-  console.log("customer", customer);
-
-  const { data: stage } = await supabase
-    .from("pipeline_stages")
-    .select("success_criteria")
-    .eq("id", customer?.pipeline_stage_id)
-    .single();
-  console.log("stage", stage);
-  const successCriteria = stage?.success_criteria;
-  console.log("successCriteria", successCriteria);
-  console.log("full_name", customer?.full_name);
-  return { successCriteria, full_name: customer?.full_name };
+  const { data: stage } = await axios.get(
+    `${BASE_NESTJS_API_URL}/pipeline-stages/${stageItem?.pipelineStageId}`
+  );
+  return {
+    successCriteria: stage.successCriteria,
+    full_name: stageItem?.party?.contact?.name,
+  };
 };
 
 export const sendSMS = async (phone_number: string, smsBody: string) => {
@@ -473,31 +518,20 @@ const sendGmail = async (
 
 export const sendEmail = async (
   client_id: string,
-  email: string,
   emailSubject: string,
   emailBody: string,
-  stage_id: string
+  emailFrom: string,
+  emailTo: string
 ) => {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
-  const { data: stage } = await supabase
-    .from("pipeline_stages")
-    .select("agent_settings")
-    .eq("id", stage_id)
-    .single();
-  console.log("stage", stage);
-
-  if (!stage?.agent_settings?.email_account) {
-    console.log("No email account found for stage", stage_id);
-    return null;
-  }
 
   const { data: emailData } = await supabase
     .from("emails")
     .select("*")
-    .eq("email", stage?.agent_settings?.email_account || "")
+    .eq("email", emailFrom)
     .eq("client_id", client_id)
     .single();
   console.log("emailData", emailData);
@@ -532,7 +566,7 @@ export const sendEmail = async (
     if (emailData?.provider === "azure-ad") {
       const response = await sendOutlookMail(
         accessToken,
-        email,
+        emailTo,
         emailSubject,
         emailBody
       );
@@ -541,7 +575,7 @@ export const sendEmail = async (
     } else {
       const response = await sendGmail(
         accessToken,
-        email,
+        emailTo,
         emailData?.email || "",
         emailSubject,
         emailBody

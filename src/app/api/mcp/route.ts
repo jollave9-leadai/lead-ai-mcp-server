@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { createMcpHandler } from "mcp-handler";
 import {
-  getCustomerWithFuzzySearch,
   getAvailableAgent,
   initiateCall,
+  getStageItemByWithFuzzySearch,
 } from "@/lib/helpers";
 import axios from "axios";
 
@@ -39,10 +39,10 @@ const handler = createMcpHandler(
         clientId: z.string(), // Injected from the prompt
       },
       async ({ name, message, clientId }) => {
-        const [customer] = await getCustomerWithFuzzySearch(name, clientId);
-        console.log("customer", customer);
+        const [stageItem] = await getStageItemByWithFuzzySearch(name, clientId);
+        console.log("stageItem", stageItem);
         console.log("clientId", clientId);
-        if (!customer) {
+        if (!stageItem?.item?.party?.contact?.name) {
           return {
             content: [
               {
@@ -52,7 +52,7 @@ const handler = createMcpHandler(
             ],
           };
         }
-        if (!customer.item.phone_number) {
+        if (!stageItem.item.party?.contact?.phoneNumber) {
           return {
             content: [
               {
@@ -74,7 +74,7 @@ const handler = createMcpHandler(
           };
         }
         await initiateCall(
-          customer.item.phone_number,
+          stageItem.item.party.contact.phoneNumber,
           agent,
           clientId,
           "Relaying message: " + message

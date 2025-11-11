@@ -1,16 +1,14 @@
 import { z } from "zod";
 import { createMcpHandler } from "mcp-handler";
 import {
-  getCustomerPipeLineWithFuzzySearch,
   getNextPipeLineStage,
   moveLeadToNextStage,
-  getCustomerInformation,
-  getCustomerWithFuzzySearch,
   getAvailableAgent,
   initiateCall,
   sendSMS,
   sendEmail,
   getSuccessCriteriaByPhoneNumber,
+  getStageItemByWithFuzzySearch,
 } from "@/lib/helpers";
 // import { CreateMessageRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 const handler = createMcpHandler(
@@ -20,10 +18,8 @@ const handler = createMcpHandler(
       "Move a customer to the next pipeline stage",
       { fullName: z.string() },
       async ({ fullName }) => {
-        const [customerPipeline] = await getCustomerPipeLineWithFuzzySearch(
-          fullName
-        );
-        if (!customerPipeline || !customerPipeline.item.full_name) {
+        const [stageItem] = await getStageItemByWithFuzzySearch(fullName);
+        if (!stageItem || !stageItem.item.party.contact.name) {
           return {
             content: [
               {
@@ -34,8 +30,8 @@ const handler = createMcpHandler(
           };
         }
         const nextStage = await getNextPipeLineStage(
-          customerPipeline.item.pipeline_stage_id,
-          customerPipeline.item.created_by
+          stageItem.item.pipelineStage.pipeline.id,
+          stageItem.item.pipelineStageId
         );
         console.log("nextStage", nextStage);
         if (!nextStage) {
@@ -43,17 +39,17 @@ const handler = createMcpHandler(
             content: [
               {
                 type: "text",
-                text: `No next pipeline stage found for ${customerPipeline.item.full_name}.`,
+                text: `No next pipeline stage found for ${stageItem.item.party.contact.name}.`,
               },
             ],
           };
         }
-        await moveLeadToNextStage(customerPipeline.item.id, nextStage.id);
+        await moveLeadToNextStage(stageItem.item.id, nextStage.id);
         return {
           content: [
             {
               type: "text",
-              text: `${customerPipeline.item.full_name} successfully moved to ${nextStage.name}`,
+              text: `${stageItem.item.party.contact.name} successfully moved to ${nextStage.name}`,
             },
           ],
         };
@@ -65,11 +61,11 @@ const handler = createMcpHandler(
       "Get information about a customer",
       { fullName: z.string(), clientId: z.string() },
       async ({ fullName, clientId }) => {
-        const customerInformation = await getCustomerInformation(
+        const [stageItem] = await getStageItemByWithFuzzySearch(
           fullName,
           clientId
         );
-        if (!customerInformation?.customerPipeline?.full_name) {
+        if (!stageItem?.item?.party?.contact?.name) {
           return {
             content: [
               {
@@ -84,8 +80,8 @@ const handler = createMcpHandler(
             {
               type: "text",
               text: `${
-                customerInformation.customerPipeline.full_name
-              } Information: ${JSON.stringify(customerInformation)}`,
+                stageItem.item.party.contact.name
+              } Information: ${JSON.stringify(stageItem.item)}`,
             },
           ],
         };
@@ -101,10 +97,10 @@ const handler = createMcpHandler(
         script: z.string(),
       },
       async ({ name, clientId, script }) => {
-        const [customer] = await getCustomerWithFuzzySearch(name, clientId);
-        console.log("customer", customer);
+        const [stageItem] = await getStageItemByWithFuzzySearch(name, clientId);
+        console.log("stageItem", stageItem);
         console.log("clientId", clientId);
-        if (!customer) {
+        if (!stageItem?.item?.party?.contact?.name) {
           return {
             content: [
               {
@@ -114,7 +110,7 @@ const handler = createMcpHandler(
             ],
           };
         }
-        if (!customer.item.phone_number) {
+        if (!stageItem.item.party.contact.phoneNumber) {
           return {
             content: [
               {
@@ -175,12 +171,17 @@ const handler = createMcpHandler(
         //     ? (response.params.messages[0].content.text as string)
         //     : "Unable to generate script";
         console.log("script", script);
-        await initiateCall(customer.item.phone_number, agent, clientId, script);
+        await initiateCall(
+          stageItem.item.party.contact.phoneNumber,
+          agent,
+          clientId,
+          script
+        );
         return {
           content: [
             {
               type: "text",
-              text: `Successfully called ${name}`,
+              text: `Successfully called ${stageItem.item.party.contact.name}`,
             },
           ],
         };
@@ -196,10 +197,10 @@ const handler = createMcpHandler(
         message: z.string(),
       },
       async ({ name, clientId, message }) => {
-        const [customer] = await getCustomerWithFuzzySearch(name, clientId);
-        console.log("customer", customer);
+        const [stageItem] = await getStageItemByWithFuzzySearch(name, clientId);
+        console.log("stageItem", stageItem);
         console.log("clientId", clientId);
-        if (!customer) {
+        if (!stageItem?.item?.party?.contact?.name) {
           return {
             content: [
               {
@@ -209,7 +210,7 @@ const handler = createMcpHandler(
             ],
           };
         }
-        if (!customer.item.phone_number) {
+        if (!stageItem.item.party.contact.phoneNumber) {
           return {
             content: [
               {
@@ -219,13 +220,16 @@ const handler = createMcpHandler(
             ],
           };
         }
-        const response = await sendSMS(customer.item.phone_number, message);
+        const response = await sendSMS(
+          stageItem.item.party.contact.phoneNumber,
+          message
+        );
         if (!response) {
           return {
             content: [
               {
                 type: "text",
-                text: `Failed to send SMS to ${name}.`,
+                text: `Failed to send SMS to ${stageItem.item.party.contact.name}.`,
               },
             ],
           };
@@ -234,7 +238,7 @@ const handler = createMcpHandler(
           content: [
             {
               type: "text",
-              text: `Successfully sent SMS to ${name}`,
+              text: `Successfully sent SMS to ${stageItem.item.party.contact.name}`,
             },
           ],
         };
@@ -247,14 +251,21 @@ const handler = createMcpHandler(
       {
         name: z.string(),
         clientId: z.string(), // Injected from the prompt
+        emailFrom: z.string(),
         emailSubject: z.string(),
         emailBody: z.string(),
       },
-      async ({ name, clientId, emailSubject, emailBody }) => {
-        const [customer] = await getCustomerWithFuzzySearch(name, clientId);
-        console.log("customer", customer);
+      async ({
+        name,
+        clientId,
+        emailSubject,
+        emailBody,
+        emailFrom,
+      }) => {
+        const [stageItem] = await getStageItemByWithFuzzySearch(name, clientId);
+        console.log("stageItem", stageItem);
         console.log("clientId", clientId);
-        if (!customer) {
+        if (!stageItem?.item?.party?.contact?.name) {
           return {
             content: [
               {
@@ -264,7 +275,7 @@ const handler = createMcpHandler(
             ],
           };
         }
-        if (!customer.item.email) {
+        if (!stageItem.item.party.contact.email) {
           return {
             content: [
               {
@@ -276,10 +287,10 @@ const handler = createMcpHandler(
         }
         const response = await sendEmail(
           clientId,
-          customer.item.email,
           emailSubject,
           emailBody,
-          customer.item.pipeline_stage_id
+          emailFrom,
+          stageItem.item.party.contact.email
         );
         console.log("response", response);
         if (!response) {
@@ -287,7 +298,7 @@ const handler = createMcpHandler(
             content: [
               {
                 type: "text",
-                text: `Failed to send Email to ${name}.`,
+                text: `Failed to send Email to ${stageItem.item.party.contact.name}.`,
               },
             ],
           };
@@ -296,7 +307,7 @@ const handler = createMcpHandler(
           content: [
             {
               type: "text",
-              text: `Successfully sent Email to ${name}`,
+              text: `Successfully sent Email to ${stageItem.item.party.contact.name}`,
             },
           ],
         };
@@ -313,10 +324,10 @@ const handler = createMcpHandler(
       async ({ phoneNumber, clientId }) => {
         console.log("Getting success criteria");
         console.log("clientId", clientId);
-        const { successCriteria, full_name } = await getSuccessCriteriaByPhoneNumber(
-          phoneNumber,
-          clientId
-        );
+        const { successCriteria, full_name } =
+          await getSuccessCriteriaByPhoneNumber(phoneNumber, clientId);
+        console.log("successCriteria", successCriteria);
+        console.log("full_name", full_name);
         if (!successCriteria) {
           return {
             content: [
