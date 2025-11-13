@@ -429,8 +429,7 @@ const handleRefreshToken = async (refreshToken: string, provider: string) => {
     );
     newAccessToken = response.data.access_token;
     newRefreshToken = response.data.refresh_token;
-    const now = Math.floor(Date.now() / 1000);
-    newExpiresAt = now + response.data.expires_in;
+    newExpiresAt = response.data.expires_in;
   } else {
     const response = await axios.post(
       "https://oauth2.googleapis.com/token",
@@ -448,8 +447,7 @@ const handleRefreshToken = async (refreshToken: string, provider: string) => {
     );
     newAccessToken = response.data.access_token;
     newRefreshToken = response.data.refresh_token;
-    const now = Math.floor(Date.now() / 1000);
-    newExpiresAt = now + response.data.expires_in;
+    newExpiresAt = response.data.expires_in;
   }
 
   return {
@@ -548,13 +546,12 @@ export const sendEmail = async (
       );
       if (refreshedToken) {
         // Store the refreshed token in the database
-        const now = Math.floor(Date.now() / 1000);
         await supabase
           .from("emails")
           .update({
             access_token: refreshedToken.access_token,
             refresh_token: refreshedToken.refresh_token,
-            expires_at: now + refreshedToken.expires_at,
+            expires_at: refreshedToken.expires_at,
           })
           .eq("email", emailData.email)
           .eq("client_id", client_id);
