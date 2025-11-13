@@ -17,7 +17,7 @@ const handler = createMcpHandler(
         const response = await axios.post(process.env.CRM_AGENT_URL!, {
           message: `clientId: ${clientId}\n\n${message}`,
         });
-        console.log("response", response);
+        // console.log("response", response);
         return {
           content: [
             {

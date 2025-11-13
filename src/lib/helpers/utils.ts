@@ -430,7 +430,7 @@ const handleRefreshToken = async (refreshToken: string, provider: string) => {
     newAccessToken = response.data.access_token;
     newRefreshToken = response.data.refresh_token;
     const now = Math.floor(Date.now() / 1000);
-    newExpiresAt = now + response.data.expiresIn;
+    newExpiresAt = now + response.data.expires_in;
   } else {
     const response = await axios.post(
       "https://oauth2.googleapis.com/token",
@@ -449,7 +449,7 @@ const handleRefreshToken = async (refreshToken: string, provider: string) => {
     newAccessToken = response.data.access_token;
     newRefreshToken = response.data.refresh_token;
     const now = Math.floor(Date.now() / 1000);
-    newExpiresAt = now + response.data.expiresIn;
+    newExpiresAt = now + response.data.expires_in;
   }
 
   return {
