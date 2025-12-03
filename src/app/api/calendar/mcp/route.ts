@@ -349,10 +349,9 @@ const handler = createMcpHandler(
                   ],
                 };
               }
+              
+              console.log(`✅ Requested time is within office hours for agent ${agent.name}`);
             }
-          }
-            
-            console.log(`✅ Requested time is within office hours for agent ${agent.name}`);
           } else {
             console.log(`⚠️ No agent assignment found for calendar connection. Proceeding without office hours validation.`);
           }
