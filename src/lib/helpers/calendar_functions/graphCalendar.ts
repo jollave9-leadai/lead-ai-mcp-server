@@ -539,7 +539,7 @@ export async function createCalendarEventForClient(
     
     if (agentAssignment && agentAssignment.agents) {
       const agent = agentAssignment.agents as unknown as {
-        id: number;
+        uuid: string;
         name: string;
         profiles: {
           id: number;
@@ -554,12 +554,14 @@ export async function createCalendarEventForClient(
         }[];
       };
       const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles
-      agentOfficeHours = profile.office_hours
-      agentTimezone = profile.timezone || clientTimezone
-      
-      console.log(`👤 Using office hours for agent: ${agent.name}`)
-      console.log(`🏢 Office hours:`, agentOfficeHours)
-      console.log(`🌍 Agent timezone: ${agentTimezone}`)
+      if (profile) {
+        agentOfficeHours = profile.office_hours
+        agentTimezone = profile.timezone || clientTimezone
+        
+        console.log(`👤 Using office hours for agent: ${agent.name}`)
+        console.log(`🏢 Office hours:`, agentOfficeHours)
+        console.log(`🌍 Agent timezone: ${agentTimezone}`)
+      }
     } else {
       console.log(`⚠️ No agent assignment found, using default business hours`)
     }
@@ -1103,7 +1105,7 @@ export async function findAvailableSlotsForClient(
     
     if (agentAssignment && agentAssignment.agents) {
       const agent = agentAssignment.agents as unknown as {
-        id: number;
+        uuid: string;
         name: string;
         profiles: {
           id: number;
@@ -1118,10 +1120,12 @@ export async function findAvailableSlotsForClient(
         }[];
       };
       const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles
-      agentOfficeHours = profile.office_hours
-      agentTimezone = profile.timezone || clientTimezone
-      
-      console.log(`👤 Using office hours for agent: ${agent.name}`)
+      if (profile) {
+        agentOfficeHours = profile.office_hours
+        agentTimezone = profile.timezone || clientTimezone
+        
+        console.log(`👤 Using office hours for agent: ${agent.name}`)
+      }
     }
 
     // Find available slots

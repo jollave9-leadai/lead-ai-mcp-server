@@ -315,7 +315,7 @@ const handler = createMcpHandler(
           
           if (agentAssignment && agentAssignment.agents) {
             const agent = agentAssignment.agents as unknown as {
-              id: number;
+              uuid: string;
               name: string;
               profiles: {
                 id: number;
@@ -331,23 +331,26 @@ const handler = createMcpHandler(
             };
             
             const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles;
-            // Check if the requested time is within office hours
-            const officeHoursCheck = isWithinOfficeHours(
-              startDateTime, 
-              profile.office_hours, 
-              profile.timezone || 'Australia/Melbourne'
-            );
-            
-            if (!officeHoursCheck.isWithin) {
-          return {
-            content: [
-              {
-                type: "text",
-                    text: `❌ **OUTSIDE OFFICE HOURS**\n\n${officeHoursCheck.reason}\n\n👤 Agent: ${agent.name}`,
-              },
-            ],
-          };
-        }
+            if (profile) {
+              // Check if the requested time is within office hours
+              const officeHoursCheck = isWithinOfficeHours(
+                startDateTime, 
+                profile.office_hours, 
+                profile.timezone || 'Australia/Melbourne'
+              );
+              
+              if (!officeHoursCheck.isWithin) {
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `❌ **OUTSIDE OFFICE HOURS**\n\n${officeHoursCheck.reason}\n\n👤 Agent: ${agent.name}`,
+                    },
+                  ],
+                };
+              }
+            }
+          }
             
             console.log(`✅ Requested time is within office hours for agent ${agent.name}`);
           } else {

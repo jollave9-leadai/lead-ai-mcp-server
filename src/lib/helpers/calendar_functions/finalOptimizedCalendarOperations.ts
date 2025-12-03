@@ -262,6 +262,10 @@ export class FinalOptimizedCalendarOperations {
         }
       }
 
+      // Invalidate busy periods cache after successful event creation
+      const eventDate = new Date(request.startDateTime).toISOString().split('T')[0]
+      await AdvancedCacheService.invalidateBusyPeriodsCache(connection.id, eventDate)
+
       return {
         success: true,
         event: eventResponse.event,
@@ -369,6 +373,15 @@ export class FinalOptimizedCalendarOperations {
 
       console.log(`✅ FINAL OPTIMIZED: Updated event ${eventId} for client ${clientId}`)
 
+      // Invalidate busy periods cache after successful event update
+      // Invalidate both old and new dates if time was changed
+      if (updates.startDateTime) {
+        const newEventDate = new Date(updates.startDateTime).toISOString().split('T')[0]
+        await AdvancedCacheService.invalidateBusyPeriodsCache(connection.id, newEventDate)
+      }
+      // Also invalidate all dates for this connection to be safe
+      await AdvancedCacheService.invalidateBusyPeriodsCache(connection.id)
+
       return {
         success: true,
         event: eventResponse.event,
@@ -444,6 +457,9 @@ export class FinalOptimizedCalendarOperations {
       }
 
       console.log(`✅ FINAL OPTIMIZED: Deleted event ${eventId} for client ${clientId}`)
+
+      // Invalidate all busy periods cache after successful event deletion
+      await AdvancedCacheService.invalidateBusyPeriodsCache(connection.id)
 
       return {
         success: true,
@@ -717,7 +733,9 @@ export class FinalOptimizedCalendarOperations {
     requestedStartTime: string,
     requestedEndTime: string,
     durationMinutes: number = 60,
-    maxSuggestions: number = 5
+    maxSuggestions: number = 3,
+    overrideOfficeHours?: Record<string, { start: string; end: string; enabled: boolean }> | null,
+    overrideTimezone?: string
   ): Promise<{
     success: boolean
     hasConflict: boolean
@@ -754,6 +772,12 @@ export class FinalOptimizedCalendarOperations {
         }
       }
 
+      // Use override office hours if provided (from specific agent), otherwise use cached
+      const finalOfficeHours = overrideOfficeHours !== undefined ? overrideOfficeHours : agentOfficeHours
+      const finalTimezone = overrideTimezone || agentTimezone || timezone
+
+      console.log(`Using office hours: ${finalOfficeHours ? 'Specific agent hours' : 'No restrictions'}`)
+
       // Use optimized conflict detection
       const slotCheck = await OptimizedConflictDetection.findAvailableSlots(
         connection, 
@@ -763,9 +787,9 @@ export class FinalOptimizedCalendarOperations {
         {
           durationMinutes, 
           maxSuggestions,
-          officeHours: agentOfficeHours,
-          agentTimezone: agentTimezone || timezone,
-          searchWindowHours: 6 // Slightly larger window for slot finding
+          officeHours: finalOfficeHours,
+          agentTimezone: finalTimezone,
+          searchWindowHours: 0 // Set to 0 to limit to same day only
         }
       )
 

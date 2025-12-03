@@ -194,7 +194,7 @@ export class CacheService {
         
         if (agentAssignment?.agents) {
           const agent = agentAssignment.agents as unknown as {
-            id: number
+            uuid: string
             name: string
             profiles: {
               office_hours: OfficeHours
@@ -206,9 +206,11 @@ export class CacheService {
           }
           
           const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles
-          agentOfficeHours = profile.office_hours
-          agentTimezone = profile.timezone
-          agentName = agent.name
+          if (profile) {
+            agentOfficeHours = profile.office_hours
+            agentTimezone = profile.timezone
+            agentName = agent.name
+          }
         }
       } catch (error) {
         console.log(`⚠️ Could not fetch agent data for client ${clientId}:`, error)
