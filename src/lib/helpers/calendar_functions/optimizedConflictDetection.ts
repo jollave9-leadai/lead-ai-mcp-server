@@ -31,9 +31,9 @@ interface AvailableSlot extends TimeSlot {
  */
 export class OptimizedConflictDetection {
   
-  // Reduced search windows for better performance
+  // Search windows - using full day to avoid timezone issues
   private static readonly SEARCH_WINDOWS = {
-    CONFLICT_CHECK: 1 * 60 * 60 * 1000,    // 1 hour before/after for conflict check
+    CONFLICT_CHECK: 24 * 60 * 60 * 1000,   // Full day to avoid timezone conversion issues
     SLOT_SEARCH: 4 * 60 * 60 * 1000,       // 4 hours before/after for slot finding
     EXTENDED_SEARCH: 8 * 60 * 60 * 1000    // 8 hours for extended search
   }
@@ -83,23 +83,32 @@ export class OptimizedConflictDetection {
         connection.id,
         dateKey,
         async () => {
-          // Reduced search window for better performance
-          const searchStart = new Date(requestedStart.getTime() - this.SEARCH_WINDOWS.CONFLICT_CHECK)
-          const searchEnd = new Date(requestedEnd.getTime() + this.SEARCH_WINDOWS.CONFLICT_CHECK)
+          // Fetch entire day to avoid timezone conversion issues
+          // Get start of day (00:00) and end of day (23:59)
+          const dayStart = new Date(requestedStart)
+          dayStart.setHours(0, 0, 0, 0)
+          
+          const dayEnd = new Date(requestedStart)
+          dayEnd.setHours(23, 59, 59, 999)
+          
+          console.log(`📅 Fetching events for entire day: ${dayStart.toISOString()} to ${dayEnd.toISOString()}`)
           
           const events = await EnhancedGraphApiService.getEventsOptimized(
             connection,
             {
-              startDateTime: searchStart.toISOString(),
-              endDateTime: searchEnd.toISOString(),
+              startDateTime: dayStart.toISOString(),
+              endDateTime: dayEnd.toISOString(),
               timeZone,
               fieldSet: 'MINIMAL'
             }
           )
           
           if (!events.success || !events.events) {
+            console.log(`⚠️ No events found or error fetching events`)
             return []
           }
+          
+          console.log(`📊 Found ${events.events.length} events for conflict checking`)
           
           return events.events.map(event => ({
             id: event.id,
@@ -111,6 +120,16 @@ export class OptimizedConflictDetection {
       ) as BusyPeriod[]
 
       // Fast overlap detection using sorted intervals
+      console.log(`🔍 Checking ${busyPeriods.length} busy periods for conflicts`)
+      console.log(`🎯 Requested slot: ${requestedStart.toISOString()} to ${requestedEnd.toISOString()}`)
+      
+      if (busyPeriods.length > 0) {
+        console.log(`📋 Existing events:`)
+        busyPeriods.forEach((period, index) => {
+          console.log(`   ${index + 1}. ${period.start.toISOString()} to ${period.end.toISOString()}`)
+        })
+      }
+      
       const conflictingEvents = this.findOverlappingEvents(
         { start: requestedStart, end: requestedEnd },
         busyPeriods
@@ -120,6 +139,9 @@ export class OptimizedConflictDetection {
         const conflictDetails = `Conflicts with ${conflictingEvents.length} existing event(s)`
         
         console.log(`❌ CONFLICT DETECTED: ${conflictingEvents.length} overlapping events`)
+        conflictingEvents.forEach((event, index) => {
+          console.log(`   Conflict ${index + 1}: ${event.start.toISOString()} to ${event.end.toISOString()}`)
+        })
         
         return {
           hasConflict: true,
@@ -167,6 +189,8 @@ export class OptimizedConflictDetection {
 
     try {
       console.log(`🔍 OPTIMIZED: Finding available slots near ${requestedStartTime}`)
+      console.log(`⏰ Office hours configured: ${officeHours ? 'YES' : 'NO'}`)
+      console.log(`📊 Max suggestions: ${maxSuggestions}`)
       
       const requestedStart = new Date(requestedStartTime)
       const requestedEnd = new Date(requestedEndTime)
@@ -273,9 +297,11 @@ export class OptimizedConflictDetection {
 
   /**
    * Check if two time slots overlap
+   * Returns true if there is any overlap between the two slots
    */
   private static hasOverlap(slot1: TimeSlot, slot2: TimeSlot): boolean {
-    return slot1.start < slot2.end && slot1.end > slot2.start
+    const overlaps = slot1.start < slot2.end && slot1.end > slot2.start
+    return overlaps
   }
 
   /**
@@ -295,9 +321,19 @@ export class OptimizedConflictDetection {
     const now = new Date()
     const minSlotTime = new Date(now.getTime() + 15 * 60 * 1000) // 15 min buffer
     
-    // Smart slot generation - focus on times near the requested time
-    const searchStart = new Date(requestedStart.getTime() - 4 * 60 * 60 * 1000) // 4h before
-    const searchEnd = new Date(requestedEnd.getTime() + 4 * 60 * 60 * 1000) // 4h after
+    // Smart slot generation - limit to same day only for better UX
+    // Get start and end of the requested day
+    const dayStart = new Date(requestedStart)
+    dayStart.setHours(0, 0, 0, 0)
+    
+    const dayEnd = new Date(requestedStart)
+    dayEnd.setHours(23, 59, 59, 999)
+    
+    // Use day boundaries for search window (don't cross to other days)
+    const searchStart = dayStart
+    const searchEnd = dayEnd
+    
+    console.log(`📅 Limiting slot search to same day: ${searchStart.toISOString()} to ${searchEnd.toISOString()}`)
     
     // Generate candidate slots with smart intervals
     const candidates = this.generateSmartCandidates(
@@ -308,14 +344,35 @@ export class OptimizedConflictDetection {
       30 // 30-minute intervals
     )
 
+    let skippedPast = 0
+    let skippedConflict = 0
+    let skippedOfficeHours = 0
+    let skippedDifferentDay = 0
+
+    // Get the requested day for comparison
+    const requestedDay = requestedStart.toISOString().split('T')[0]
+
     for (const candidate of candidates) {
       if (slots.length >= maxSuggestions) break
       
+      // Skip if not on the same day as requested
+      const candidateDay = candidate.start.toISOString().split('T')[0]
+      if (candidateDay !== requestedDay) {
+        skippedDifferentDay++
+        continue
+      }
+      
       // Skip if in the past
-      if (candidate.start < minSlotTime) continue
+      if (candidate.start < minSlotTime) {
+        skippedPast++
+        continue
+      }
       
       // Check if slot conflicts with busy periods
-      if (this.slotHasConflict(candidate, busyPeriods)) continue
+      if (this.slotHasConflict(candidate, busyPeriods)) {
+        skippedConflict++
+        continue
+      }
       
       // Check office hours if provided
       if (officeHours) {
@@ -324,7 +381,10 @@ export class OptimizedConflictDetection {
           officeHours,
           agentTimezone || 'Australia/Melbourne'
         )
-        if (!officeHoursCheck.isWithin) continue
+        if (!officeHoursCheck.isWithin) {
+          skippedOfficeHours++
+          continue
+        }
       }
 
       // Calculate confidence score based on proximity to requested time
@@ -338,6 +398,8 @@ export class OptimizedConflictDetection {
         confidence
       })
     }
+
+    console.log(`📊 Slot filtering: ${slots.length} available | Skipped: ${skippedDifferentDay} different day, ${skippedPast} past, ${skippedConflict} conflicts, ${skippedOfficeHours} outside office hours`)
 
     // Sort by confidence (best slots first)
     return slots.sort((a, b) => b.confidence - a.confidence)

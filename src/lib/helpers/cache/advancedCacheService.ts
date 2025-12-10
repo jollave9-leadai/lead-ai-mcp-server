@@ -44,7 +44,7 @@ class AdvancedMemoryCache {
   private readonly maxMemoryMB: number = 100
   private readonly maxEntries: number = 1000
   private readonly cleanupIntervalMs: number = 5 * 60 * 1000 // 5 minutes
-  private readonly memoryCheckIntervalMs: number = 30 * 1000 // 30 seconds
+  private readonly memoryCheckIntervalMs: number = 5 * 60 * 1000 // 5 minutes (reduced frequency)
   
   // Statistics
   private stats = {
@@ -208,8 +208,9 @@ class AdvancedMemoryCache {
       }
     }
 
-    if (cleanedCount > 0) {
-      console.log(`🧹 Cleaned up ${cleanedCount} expired cache entries`)
+    // Only log significant cleanups to reduce noise
+    if (cleanedCount > 10) {
+      console.log(`Cache cleaned: ${cleanedCount} expired entries removed`)
     }
   }
 
@@ -217,9 +218,10 @@ class AdvancedMemoryCache {
     const memUsage = process.memoryUsage()
     const heapUsedMB = memUsage.heapUsed / (1024 * 1024)
     
-    // If Node.js heap usage is high, trigger aggressive cleanup
-    if (heapUsedMB > 500) { // 500MB threshold
-      console.log(`⚠️ High memory usage detected: ${heapUsedMB.toFixed(2)}MB`)
+    // If Node.js heap usage is critically high, trigger aggressive cleanup
+    // Increased threshold for Next.js apps which typically use 700-900MB
+    if (heapUsedMB > 1024) { // 1GB threshold for production apps
+      console.log(`High memory usage detected: ${heapUsedMB.toFixed(2)}MB`)
       this.forceCleanup()
     }
   }
@@ -236,7 +238,12 @@ class AdvancedMemoryCache {
     }
     
     const afterSize = this.cache.size
-    console.log(`🚨 Force cleanup: ${beforeSize} → ${afterSize} entries`)
+    const cleaned = beforeSize - afterSize
+    
+    // Only log if significant cleanup occurred
+    if (cleaned > 10) {
+      console.log(`Cache cleanup: ${beforeSize} → ${afterSize} entries (freed ${cleaned})`)
+    }
   }
 
   private estimateSize(data: unknown): number {
@@ -385,11 +392,11 @@ export class AdvancedCacheService {
 
       try {
         const { getAgentByCalendarConnection } = await import('../utils')
-        const agentAssignment = await getAgentByCalendarConnection(connection.id, clientId)
+        const agentAssignment = await getAgentByCalendarConnection(connection.id)
         
         if (agentAssignment?.agents) {
           const agent = agentAssignment.agents as unknown as {
-            id: number
+            uuid: string
             name: string
             profiles: {
               office_hours: OfficeHours
@@ -401,12 +408,14 @@ export class AdvancedCacheService {
           }
           
           const profile = Array.isArray(agent.profiles) ? agent.profiles[0] : agent.profiles
-          agentOfficeHours = profile.office_hours
-          agentTimezone = profile.timezone
-          agentName = agent.name
+          if (profile) {
+            agentOfficeHours = profile.office_hours
+            agentTimezone = profile.timezone
+            agentName = agent.name
+          }
         }
       } catch (error) {
-        console.log(`⚠️ Could not fetch agent data for client ${clientId}:`, error)
+        console.log(`Could not fetch agent data for client ${clientId}:`, error)
       }
 
       clientData = {
@@ -448,6 +457,23 @@ export class AdvancedCacheService {
     await advancedCache.set(cacheKey, busyPeriods, this.TTL.BUSY_PERIODS)
     
     return busyPeriods
+  }
+
+  /**
+   * Invalidate busy periods cache for a connection
+   * Should be called after creating, updating, or deleting events
+   */
+  static async invalidateBusyPeriodsCache(connectionId: string, date?: string): Promise<void> {
+    if (date) {
+      // Invalidate specific date
+      const cacheKey = `busy-periods:${connectionId}:${date}`
+      await advancedCache.delete(cacheKey)
+      console.log(`🗑️ Cache INVALIDATED: Busy periods for ${connectionId} on ${date}`)
+    } else {
+      // Invalidate all dates for this connection
+      await advancedCache.deletePattern(`busy-periods:${connectionId}:*`)
+      console.log(`🗑️ Cache INVALIDATED: All busy periods for ${connectionId}`)
+    }
   }
 
   /**
