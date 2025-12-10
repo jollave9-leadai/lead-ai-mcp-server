@@ -532,7 +532,7 @@ export async function createCalendarEventForClient(
 
     // Get agent office hours for this calendar connection
     const { getAgentByCalendarConnection } = await import('../utils')
-    const agentAssignment = await getAgentByCalendarConnection(connection.id, clientId)
+    const agentAssignment = await getAgentByCalendarConnection(connection.id)
     
     let agentOfficeHours: Record<string, { start: string; end: string; enabled: boolean }> | null = null
     let agentTimezone = clientTimezone
@@ -1098,7 +1098,7 @@ export async function findAvailableSlotsForClient(
 
     // Get agent office hours for this calendar connection
     const { getAgentByCalendarConnection } = await import('../utils')
-    const agentAssignment = await getAgentByCalendarConnection(connection.id, clientId)
+    const agentAssignment = await getAgentByCalendarConnection(connection.id)
     
     let agentOfficeHours: Record<string, { start: string; end: string; enabled: boolean }> | null = null
     let agentTimezone = clientTimezone

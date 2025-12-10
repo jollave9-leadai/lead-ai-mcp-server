@@ -392,7 +392,7 @@ export class AdvancedCacheService {
 
       try {
         const { getAgentByCalendarConnection } = await import('../utils')
-        const agentAssignment = await getAgentByCalendarConnection(connection.id, clientId)
+        const agentAssignment = await getAgentByCalendarConnection(connection.id)
         
         if (agentAssignment?.agents) {
           const agent = agentAssignment.agents as unknown as {
@@ -415,7 +415,7 @@ export class AdvancedCacheService {
           }
         }
       } catch (error) {
-        console.log(`⚠️ Could not fetch agent data for client ${clientId}:`, error)
+        console.log(`Could not fetch agent data for client ${clientId}:`, error)
       }
 
       clientData = {

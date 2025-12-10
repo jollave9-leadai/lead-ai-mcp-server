@@ -311,7 +311,7 @@ const handler = createMcpHandler(
           }
 
           // Get agent assigned to this calendar connection
-          const agentAssignment = await getAgentByCalendarConnection(connection.id, numericClientId);
+          const agentAssignment = await getAgentByCalendarConnection(connection.id);
           
           if (agentAssignment && agentAssignment.agents) {
             const agent = agentAssignment.agents as unknown as {

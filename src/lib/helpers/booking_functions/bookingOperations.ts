@@ -17,7 +17,6 @@ import type {
   BookingOperationResponse,
   FindBookingSlotsRequest,
   BookingSlot,
-  GetAgentAvailabilityRequest,
   ListAgentsRequest,
   AgentSummary,
   CancelCustomerAppointmentRequest,
@@ -672,6 +671,7 @@ export class BookingOperations {
           errors.push("Customer/contact not found and no email provided");
         }
       } catch (error) {
+        console.log(error)
         warnings.push("Could not search customer/contact database");
       }
 

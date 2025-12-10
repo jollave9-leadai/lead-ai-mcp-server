@@ -190,7 +190,7 @@ export class CacheService {
 
       try {
         const { getAgentByCalendarConnection } = await import('../utils')
-        const agentAssignment = await getAgentByCalendarConnection(connection.id, clientId)
+        const agentAssignment = await getAgentByCalendarConnection(connection.id)
         
         if (agentAssignment?.agents) {
           const agent = agentAssignment.agents as unknown as {

@@ -627,7 +627,6 @@ export const sendEmail = async (
  */
 export const getAgentByCalendarConnection = async (
   calendarConnectionId: string,
-  clientId: number
 ) => {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
